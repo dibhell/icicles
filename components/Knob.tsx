@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface KnobProps {
   label?: string;
@@ -26,117 +26,93 @@ export const Knob: React.FC<KnobProps> = ({
   size = 48,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
-  
-  // Refs to hold mutable state without triggering re-renders inside event listeners
+
+  // Refs for logic (values that don't need re-renders)
   const startY = useRef(0);
   const startValue = useRef(0);
-  const knobRef = useRef<HTMLDivElement | null>(null);
-  const draggingRef = useRef(false);
   
-  // IMPORTANT: Keep latest props in a ref so the useEffect listener doesn't need dependencies
-  const stateRef = useRef({ value, min, max, step, onChange });
-  
-  // Update ref on every render
+  // We store the latest props in a ref to access them inside window listeners
+  // without needing to add/remove listeners on every render.
+  const propsRef = useRef({ value, min, max, step, onChange });
   useEffect(() => {
-    stateRef.current = { value, min, max, step, onChange };
+      propsRef.current = { value, min, max, step, onChange };
   }, [value, min, max, step, onChange]);
 
-  // Calculations for display
-  const range = max - min;
-  const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
-  const rotation = normalized * 270 - 135;
+  // --- CORE CALCULATION ---
+  const calculateNewValue = (clientY: number) => {
+      const { min, max, step, onChange } = propsRef.current;
+      const range = max - min;
+      const deltaY = startY.current - clientY; // Up is positive
+      const sensitivity = range / 200; // 200px for full range movement
 
-  const processMove = (clientY: number) => {
-    const { min, max, step, onChange } = stateRef.current;
-    const currentRange = max - min;
-    
-    const deltaY = startY.current - clientY;
-    const sensitivity = currentRange / 200; // 200px for full range
-
-    let newValue = startValue.current + deltaY * sensitivity;
-    newValue = Math.round(newValue / step) * step;
-    newValue = Math.max(min, Math.min(max, newValue));
-
-    onChange(newValue);
+      let newValue = startValue.current + (deltaY * sensitivity);
+      
+      // Snapping and clamping
+      newValue = Math.round(newValue / step) * step;
+      newValue = Math.max(min, Math.min(max, newValue));
+      
+      onChange(newValue);
   };
 
-  // ---------- MOUSE EVENTS (Desktop) ----------
+  // --- PC / MOUSE LOGIC ---
+  // Uses window listeners so you can drag outside the knob
   const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    setIsDragging(true);
-    startY.current = e.clientY;
-    startValue.current = value;
-    document.body.style.cursor = 'ns-resize';
-    
-    window.addEventListener('mousemove', handleWindowMouseMove);
-    window.addEventListener('mouseup', handleWindowMouseUp);
+      e.preventDefault();
+      setIsDragging(true);
+      startY.current = e.clientY;
+      startValue.current = propsRef.current.value;
+      document.body.style.cursor = 'ns-resize';
+
+      window.addEventListener('mousemove', handleWindowMouseMove);
+      window.addEventListener('mouseup', handleWindowMouseUp);
   };
 
   const handleWindowMouseMove = (e: MouseEvent) => {
-    if (!draggingRef.current) return;
-    e.preventDefault();
-    processMove(e.clientY);
+      e.preventDefault();
+      calculateNewValue(e.clientY);
   };
 
   const handleWindowMouseUp = () => {
-    draggingRef.current = false;
-    setIsDragging(false);
-    document.body.style.cursor = '';
-    window.removeEventListener('mousemove', handleWindowMouseMove);
-    window.removeEventListener('mouseup', handleWindowMouseUp);
+      setIsDragging(false);
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
   };
 
-  // ---------- TOUCH EVENTS (Mobile Native) ----------
-  // We use a non-passive listener attached via ref to prevent scroll interference on Android
-  useEffect(() => {
-    const el = knobRef.current;
-    if (!el) return;
+  // --- MOBILE / TOUCH LOGIC ---
+  // Relies on CSS 'touch-action: none' to prevent scrolling. 
+  // This allows standard React events to work perfectly without native listener hacks.
+  const handleTouchStart = (e: React.TouchEvent) => {
+      setIsDragging(true);
+      startY.current = e.touches[0].clientY;
+      startValue.current = propsRef.current.value;
+  };
 
-    const onTouchStart = (e: TouchEvent) => {
-        e.preventDefault(); // Stop emulation of mouse events
-        draggingRef.current = true;
-        setIsDragging(true);
-        startY.current = e.touches[0].clientY;
-        startValue.current = stateRef.current.value;
-    };
+  const handleTouchMove = (e: React.TouchEvent) => {
+      calculateNewValue(e.touches[0].clientY);
+  };
 
-    const onTouchMove = (e: TouchEvent) => {
-        if (!draggingRef.current) return;
-        // passive: false allows us to preventDefault, stopping the page from scrolling
-        e.preventDefault(); 
-        if (e.touches[0]) {
-            processMove(e.touches[0].clientY);
-        }
-    };
-
-    const onTouchEnd = (e: TouchEvent) => {
-        if (draggingRef.current) {
-            e.preventDefault();
-            draggingRef.current = false;
-            setIsDragging(false);
-        }
-    };
-
-    // Binding with { passive: false } is crucial for Chrome Android
-    el.addEventListener('touchstart', onTouchStart, { passive: false });
-    el.addEventListener('touchmove', onTouchMove, { passive: false });
-    el.addEventListener('touchend', onTouchEnd, { passive: false });
-    el.addEventListener('touchcancel', onTouchEnd, { passive: false });
-
-    return () => {
-        el.removeEventListener('touchstart', onTouchStart);
-        el.removeEventListener('touchmove', onTouchMove);
-        el.removeEventListener('touchend', onTouchEnd);
-        el.removeEventListener('touchcancel', onTouchEnd);
-    };
-  }, []); // Empty dependency array = binds ONLY ONCE.
+  const handleTouchEnd = () => {
+      setIsDragging(false);
+  };
 
   const handleDoubleClick = () => {
     if (defaultValue !== undefined) onChange(defaultValue);
   };
 
-  // SVG Maths
+  // Cleanup to ensure no stuck listeners if component unmounts while dragging
+  useEffect(() => {
+      return () => {
+          window.removeEventListener('mousemove', handleWindowMouseMove);
+          window.removeEventListener('mouseup', handleWindowMouseUp);
+      };
+  }, []);
+
+  // --- VISUALS ---
+  const range = max - min;
+  const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
+  const rotation = normalized * 270 - 135;
+  
   const r = size / 2 - 4;
   const dashArray = 2 * Math.PI * r;
   const dashOffset = dashArray - normalized * (dashArray * 0.75);
@@ -145,14 +121,20 @@ export const Knob: React.FC<KnobProps> = ({
   return (
     <div className="flex flex-col items-center gap-1 select-none">
       <div
-        ref={knobRef}
         className="relative cursor-ns-resize group"
         style={{
           width: size,
           height: size,
-          touchAction: 'none', // Critical for browser to know this isn't for scrolling
+          // CRITICAL FOR MOBILE: This CSS property tells the browser 
+          // "Do not scroll when touching this element".
+          // This makes React's onTouchMove work instantly and smoothly.
+          touchAction: 'none' 
         }}
         onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
         onDoubleClick={handleDoubleClick}
         title="Double-click to reset"
       >
