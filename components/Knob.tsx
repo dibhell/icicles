@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 interface KnobProps {
   label?: string;
@@ -26,89 +26,80 @@ export const Knob: React.FC<KnobProps> = ({
   size = 48,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
+
   const startY = useRef(0);
   const startValue = useRef(0);
-
-  const knobRef = useRef<HTMLDivElement | null>(null);
-  const draggingRef = useRef(false);
+  const activePointerId = useRef<number | null>(null);
 
   const range = max - min;
-  const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
+  const normalized = useMemo(() => {
+    if (range <= 0) return 0;
+    return Math.min(1, Math.max(0, (value - min) / range));
+  }, [value, min, range]);
+
   const rotation = normalized * 270 - 135;
 
-  const processMove = (clientY: number) => {
-    const deltaY = startY.current - clientY;
-    const sensitivity = range / 200;
-
-    let newValue = startValue.current + deltaY * sensitivity;
-    newValue = Math.round(newValue / step) * step;
-    newValue = Math.max(min, Math.min(max, newValue));
-
-    onChange(newValue);
+  const clampSnap = (v: number) => {
+    const snapped = Math.round(v / step) * step;
+    return Math.max(min, Math.min(max, snapped));
   };
 
-  // ---------- MOUSE ----------
-  const handleMouseMove = (e: MouseEvent) => {
+  const processMove = (clientY: number) => {
+    const deltaY = startY.current - clientY; // up = +
+    const sensitivity = range / 200;
+    const next = startValue.current + deltaY * sensitivity;
+    onChange(clampSnap(next));
+  };
+
+  const endDrag = () => {
+    setIsDragging(false);
+    document.body.style.cursor = '';
+    activePointerId.current = null;
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    activePointerId.current = e.pointerId;
+    setIsDragging(true);
+    startY.current = e.clientY;
+    startValue.current = value;
+
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'ns-resize';
+
+    // ważne na mobile: od razu zatrzymaj “native gesture”
+    e.preventDefault();
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!isDragging) return;
+    if (activePointerId.current !== e.pointerId) return;
+
+    // bez tego Android potrafi próbować scrollować w tle
     e.preventDefault();
     processMove(e.clientY);
   };
 
-  const handleMouseUp = () => {
-    draggingRef.current = false;
-    setIsDragging(false);
-    document.body.style.cursor = '';
-    window.removeEventListener('mousemove', handleMouseMove);
-    window.removeEventListener('mouseup', handleMouseUp);
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (activePointerId.current !== e.pointerId) return;
+    endDrag();
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    setIsDragging(true);
-    startY.current = e.clientY;
-    startValue.current = value;
-    document.body.style.cursor = 'ns-resize';
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+  const onPointerCancel = (e: React.PointerEvent) => {
+    if (activePointerId.current !== e.pointerId) return;
+    endDrag();
   };
 
-  // ---------- TOUCH (NATIVE, passive:false) ----------
+  const onDoubleClick = () => {
+    if (defaultValue !== undefined) onChange(clampSnap(defaultValue));
+  };
+
   useEffect(() => {
-    const el = knobRef.current;
-    if (!el) return;
-
-    const onTouchMoveNative = (ev: TouchEvent) => {
-      if (!draggingRef.current) return;
-      // to MUSI być native + passive:false żeby Chrome Android nie scrollował
-      ev.preventDefault();
-      const t = ev.touches[0];
-      if (!t) return;
-      processMove(t.clientY);
-    };
-
-    el.addEventListener('touchmove', onTouchMoveNative, { passive: false });
-
     return () => {
-      el.removeEventListener('touchmove', onTouchMoveNative as any);
+      document.body.style.cursor = '';
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, step, min, max, onChange]);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    draggingRef.current = true;
-    setIsDragging(true);
-    startY.current = e.touches[0].clientY;
-    startValue.current = value;
-  };
-
-  const handleTouchEnd = () => {
-    draggingRef.current = false;
-    setIsDragging(false);
-  };
-
-  const handleDoubleClick = () => {
-    if (defaultValue !== undefined) onChange(defaultValue);
-  };
+  }, []);
 
   // SVG
   const r = size / 2 - 4;
@@ -119,19 +110,20 @@ export const Knob: React.FC<KnobProps> = ({
   return (
     <div className="flex flex-col items-center gap-1 select-none">
       <div
-        ref={knobRef}
         className="relative cursor-ns-resize group"
         style={{
           width: size,
           height: size,
-          // scroll działa normalnie, dopóki nie kręcisz
-          touchAction: isDragging ? 'none' : 'pan-y',
+          // klucz: scroll działa w appce, ale gdy dotkniesz gałki i zaczniesz dragować,
+          // pointer capture + preventDefault przejmują sterowanie bez hacków na body
+          touchAction: 'manipulation',
+          userSelect: 'none',
         }}
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
-        onDoubleClick={handleDoubleClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onDoubleClick={onDoubleClick}
         title="Double-click to reset"
       >
         <svg width={size} height={size} className="transform rotate-90 drop-shadow-sm pointer-events-none">
