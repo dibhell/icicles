@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface KnobProps {
   label?: string;
@@ -26,77 +26,82 @@ export const Knob: React.FC<KnobProps> = ({
   size = 48,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
-  const startY = useRef(0);
-  const startValue = useRef(0);
+  const startY = useRef<number>(0);
+  const startValue = useRef<number>(0);
 
   const range = max - min;
   const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
   const rotation = normalized * 270 - 135;
 
+  // --- COMMON LOGIC ---
   const processMove = (clientY: number) => {
-    const deltaY = startY.current - clientY; // up = positive
-    const sensitivity = range / 200; // 200px for full range
-    let next = startValue.current + deltaY * sensitivity;
+    const deltaY = startY.current - clientY; // Up is positive
+    const sensitivity = range / 200;
 
-    next = Math.round(next / step) * step;
-    next = Math.max(min, Math.min(max, next));
-    onChange(next);
+    let newValue = startValue.current + deltaY * sensitivity;
+
+    newValue = Math.round(newValue / step) * step;
+    newValue = Math.max(min, Math.min(max, newValue));
+
+    onChange(newValue);
   };
 
-  // ---------- MOUSE ----------
-  const onMouseMove = (e: MouseEvent) => {
+  // --- MOUSE EVENTS ---
+  const handleMouseMove = (e: MouseEvent) => {
+    e.preventDefault();
     processMove(e.clientY);
   };
 
-  const onMouseUp = () => {
+  const handleMouseUp = () => {
     setIsDragging(false);
     document.body.style.cursor = '';
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
   };
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
     startY.current = e.clientY;
     startValue.current = value;
-    document.body.style.cursor = 'ns-resize';
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = 'ns-resize';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // ---------- TOUCH ----------
-  const onTouchStart = (e: React.TouchEvent) => {
+  // --- TOUCH EVENTS (Mobile) ---
+  const handleTouchStart = (e: React.TouchEvent) => {
     setIsDragging(true);
     startY.current = e.touches[0].clientY;
     startValue.current = value;
   };
 
-  const onTouchMove = (e: React.TouchEvent) => {
-    // kluczowe: tylko gdy kręcisz, blokuj natywne przewijanie
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // podczas kręcenia blokujemy przewijanie TYLKO na tym elemencie
     e.preventDefault();
     processMove(e.touches[0].clientY);
   };
 
-  const onTouchEnd = () => {
+  const handleTouchEnd = () => {
     setIsDragging(false);
   };
 
+  const handleDoubleClick = () => {
+    if (defaultValue !== undefined) onChange(defaultValue);
+  };
+
+  // Cleanup (mysz)
   useEffect(() => {
     return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
       document.body.style.cursor = '';
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onDoubleClick = () => {
-    if (defaultValue !== undefined) onChange(defaultValue);
-  };
-
-  // SVG arc
+  // SVG Arc calculation
   const r = size / 2 - 4;
   const dashArray = 2 * Math.PI * r;
   const dashOffset = dashArray - normalized * (dashArray * 0.75);
@@ -109,15 +114,15 @@ export const Knob: React.FC<KnobProps> = ({
         style={{
           width: size,
           height: size,
-          // nie zabijaj scrolla zawsze; tylko podczas drag
+          // scroll działa normalnie, dopóki nie kręcisz
           touchAction: isDragging ? 'none' : 'pan-y',
         }}
-        onMouseDown={onMouseDown}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
-        onDoubleClick={onDoubleClick}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        onDoubleClick={handleDoubleClick}
         title="Double-click to reset"
       >
         <svg width={size} height={size} className="transform rotate-90 drop-shadow-sm pointer-events-none">
@@ -167,5 +172,3 @@ export const Knob: React.FC<KnobProps> = ({
     </div>
   );
 };
-
-export default Knob;
