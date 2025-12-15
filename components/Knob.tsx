@@ -26,19 +26,32 @@ export const Knob: React.FC<KnobProps> = ({
   size = 48,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
+  
+  // Refs to hold mutable state without triggering re-renders inside event listeners
   const startY = useRef(0);
   const startValue = useRef(0);
-
   const knobRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
+  
+  // IMPORTANT: Keep latest props in a ref so the useEffect listener doesn't need dependencies
+  const stateRef = useRef({ value, min, max, step, onChange });
+  
+  // Update ref on every render
+  useEffect(() => {
+    stateRef.current = { value, min, max, step, onChange };
+  }, [value, min, max, step, onChange]);
 
+  // Calculations for display
   const range = max - min;
   const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
   const rotation = normalized * 270 - 135;
 
   const processMove = (clientY: number) => {
+    const { min, max, step, onChange } = stateRef.current;
+    const currentRange = max - min;
+    
     const deltaY = startY.current - clientY;
-    const sensitivity = range / 200;
+    const sensitivity = currentRange / 200; // 200px for full range
 
     let newValue = startValue.current + deltaY * sensitivity;
     newValue = Math.round(newValue / step) * step;
@@ -47,20 +60,7 @@ export const Knob: React.FC<KnobProps> = ({
     onChange(newValue);
   };
 
-  // ---------- MOUSE ----------
-  const handleMouseMove = (e: MouseEvent) => {
-    e.preventDefault();
-    processMove(e.clientY);
-  };
-
-  const handleMouseUp = () => {
-    draggingRef.current = false;
-    setIsDragging(false);
-    document.body.style.cursor = '';
-    window.removeEventListener('mousemove', handleMouseMove);
-    window.removeEventListener('mouseup', handleMouseUp);
-  };
-
+  // ---------- MOUSE EVENTS (Desktop) ----------
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     draggingRef.current = true;
@@ -68,49 +68,75 @@ export const Knob: React.FC<KnobProps> = ({
     startY.current = e.clientY;
     startValue.current = value;
     document.body.style.cursor = 'ns-resize';
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
   };
 
-  // ---------- TOUCH (NATIVE, passive:false) ----------
+  const handleWindowMouseMove = (e: MouseEvent) => {
+    if (!draggingRef.current) return;
+    e.preventDefault();
+    processMove(e.clientY);
+  };
+
+  const handleWindowMouseUp = () => {
+    draggingRef.current = false;
+    setIsDragging(false);
+    document.body.style.cursor = '';
+    window.removeEventListener('mousemove', handleWindowMouseMove);
+    window.removeEventListener('mouseup', handleWindowMouseUp);
+  };
+
+  // ---------- TOUCH EVENTS (Mobile Native) ----------
+  // We use a non-passive listener attached via ref to prevent scroll interference on Android
   useEffect(() => {
     const el = knobRef.current;
     if (!el) return;
 
-    const onTouchMoveNative = (ev: TouchEvent) => {
-      if (!draggingRef.current) return;
-      // to MUSI być native + passive:false żeby Chrome Android nie scrollował
-      ev.preventDefault();
-      const t = ev.touches[0];
-      if (!t) return;
-      processMove(t.clientY);
+    const onTouchStart = (e: TouchEvent) => {
+        e.preventDefault(); // Stop emulation of mouse events
+        draggingRef.current = true;
+        setIsDragging(true);
+        startY.current = e.touches[0].clientY;
+        startValue.current = stateRef.current.value;
     };
 
-    el.addEventListener('touchmove', onTouchMoveNative, { passive: false });
+    const onTouchMove = (e: TouchEvent) => {
+        if (!draggingRef.current) return;
+        // passive: false allows us to preventDefault, stopping the page from scrolling
+        e.preventDefault(); 
+        if (e.touches[0]) {
+            processMove(e.touches[0].clientY);
+        }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+        if (draggingRef.current) {
+            e.preventDefault();
+            draggingRef.current = false;
+            setIsDragging(false);
+        }
+    };
+
+    // Binding with { passive: false } is crucial for Chrome Android
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
     return () => {
-      el.removeEventListener('touchmove', onTouchMoveNative as any);
+        el.removeEventListener('touchstart', onTouchStart);
+        el.removeEventListener('touchmove', onTouchMove);
+        el.removeEventListener('touchend', onTouchEnd);
+        el.removeEventListener('touchcancel', onTouchEnd);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, step, min, max, onChange]);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    draggingRef.current = true;
-    setIsDragging(true);
-    startY.current = e.touches[0].clientY;
-    startValue.current = value;
-  };
-
-  const handleTouchEnd = () => {
-    draggingRef.current = false;
-    setIsDragging(false);
-  };
+  }, []); // Empty dependency array = binds ONLY ONCE.
 
   const handleDoubleClick = () => {
     if (defaultValue !== undefined) onChange(defaultValue);
   };
 
-  // SVG
+  // SVG Maths
   const r = size / 2 - 4;
   const dashArray = 2 * Math.PI * r;
   const dashOffset = dashArray - normalized * (dashArray * 0.75);
@@ -124,17 +150,14 @@ export const Knob: React.FC<KnobProps> = ({
         style={{
           width: size,
           height: size,
-          // scroll działa normalnie, dopóki nie kręcisz
-          touchAction: isDragging ? 'none' : 'pan-y',
+          touchAction: 'none', // Critical for browser to know this isn't for scrolling
         }}
         onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
         onDoubleClick={handleDoubleClick}
         title="Double-click to reset"
       >
         <svg width={size} height={size} className="transform rotate-90 drop-shadow-sm pointer-events-none">
+          {/* Background Track */}
           <circle
             cx={size / 2}
             cy={size / 2}
@@ -146,6 +169,7 @@ export const Knob: React.FC<KnobProps> = ({
             strokeDashoffset={dashArray * 0.25}
             strokeLinecap="round"
           />
+          {/* Value Arc */}
           <circle
             cx={size / 2}
             cy={size / 2}
@@ -161,6 +185,7 @@ export const Knob: React.FC<KnobProps> = ({
           />
         </svg>
 
+        {/* Indicator */}
         <div
           className="absolute top-0 left-0 w-full h-full flex items-center justify-center pointer-events-none"
           style={{ transform: `rotate(${rotation}deg)` }}
