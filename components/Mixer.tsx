@@ -107,40 +107,52 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
         {/* SECTION 2: VOLUME */}
         <div className="flex items-end gap-6 px-4 h-full pb-4">
-             {/* VU */}
-             <div className="flex flex-col items-center h-32 justify-end gap-1">
-                <span className="text-[8px] opacity-60 mb-auto pt-1">PEAK</span>
-                <canvas ref={vuCanvasRef} width={6} height={80} className="rounded-sm bg-black/5" />
-                <span className="text-[8px] opacity-60 mt-2">dB</span>
-             </div>
+             {/* Use a grid to ensure perfect horizontal alignment of tops and bottoms */}
+             <div className="grid grid-cols-2 gap-x-6 gap-y-1 h-32 items-end">
+                
+                {/* Headers */}
+                <div className="text-[8px] opacity-60 text-center uppercase tracking-wider mb-auto pt-1">Peak</div>
+                <div className="text-[10px] font-bold text-center uppercase tracking-wider mb-auto pt-1">Main</div>
 
-             {/* Fader */}
-             <div className="flex flex-col items-center h-32 justify-end gap-1">
-                <span className="text-[10px] font-bold mb-auto pt-1">MAIN</span>
-                <div className="relative h-20 w-8 flex justify-center">
-                    <input 
-                    type="range" 
-                    min="0" 
-                    max="1" 
-                    step="0.01" 
-                    value={settings.volume} 
-                    onChange={(e) => setSettings(p => ({ ...p, volume: parseFloat(e.target.value) }))}
-                    className="h-20 w-1.5 bg-[#B9BCB7] rounded-full appearance-none cursor-pointer accent-[#7A8476] absolute z-10"
-                    style={{ appearance: 'slider-vertical' as any }}
-                    />
+                {/* Meter & Slider - FIXED HEIGHT to ensure flush alignment */}
+                <div className="h-24 flex justify-center">
+                    <canvas ref={vuCanvasRef} width={6} height={96} className="rounded-sm bg-black/5 h-full w-2" />
                 </div>
-                {/* Moved percentage text completely below the slider area with margin */}
-                <span className="text-[9px] w-8 text-center mt-2">{(settings.volume * 100).toFixed(0)}%</span>
+                
+                <div className="h-24 flex justify-center relative w-8">
+                     <div className="absolute inset-y-0 w-1.5 bg-[#B9BCB7] rounded-full left-1/2 -translate-x-1/2"></div>
+                     <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.01" 
+                        value={settings.volume} 
+                        onChange={(e) => setSettings(p => ({ ...p, volume: parseFloat(e.target.value) }))}
+                        className="h-full w-6 opacity-0 cursor-pointer absolute z-10"
+                        style={{ appearance: 'slider-vertical' as any }}
+                    />
+                     {/* Custom Thumb Visual - Simple circle that moves */}
+                     <div 
+                        className="absolute w-4 h-4 bg-[#7A8476] rounded-full shadow-sm left-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-75"
+                        style={{ bottom: `calc(${settings.volume * 100}% - 8px)` }}
+                     ></div>
+                </div>
+
+                {/* Footers */}
+                <div className="text-[8px] opacity-60 text-center">dB</div>
+                <div className="text-[9px] text-center">{(settings.volume * 100).toFixed(0)}%</div>
+
              </div>
         </div>
 
         <div className="w-px h-16 bg-[#B9BCB7]/50"></div>
 
         {/* SECTION 3: EQ */}
-        <div className="flex gap-4 px-6 bg-[#F2F2F0] py-4 rounded-xl border border-[#B9BCB7]/30 shadow-inner">
+        <div className="flex gap-4 px-6 bg-[#F2F2F0] py-4 rounded-xl border border-[#B9BCB7]/30 shadow-inner h-32 items-end">
              {['low', 'mid', 'high'].map((band) => (
-                <div key={band} className="flex flex-col items-center gap-2">
-                    <div className="h-16 w-2.5 bg-[#D9DBD6] rounded-full relative overflow-hidden group border border-[#B9BCB7]">
+                <div key={band} className="flex flex-col items-center gap-2 h-full justify-between">
+                     {/* Spacer for alignment with MAIN text if needed, or just justify-end */}
+                    <div className="h-24 w-2.5 bg-[#D9DBD6] rounded-full relative overflow-hidden group border border-[#B9BCB7]">
                          {/* Fill */}
                         <div 
                             className={`absolute bottom-0 w-full bg-[#5F665F] rounded-b-full transition-all`} 
