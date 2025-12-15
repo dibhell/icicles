@@ -30,7 +30,7 @@ const MAX_SPEED = 22;            // px per tick-ish (tempo-scaled below)
 const MAX_ACCEL = 6;             // per frame contribution (tempo-scaled below)
 
 // Audio spam guard (optional but helps when magneto pins on walls)
-const AUDIO_COOLDOWN_MS = 80;
+const AUDIO_COOLDOWN_MS = 50;
 
 type BubbleExt = Bubble & {
   lastAudioAt?: number;
