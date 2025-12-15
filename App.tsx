@@ -4,6 +4,7 @@ import { Mixer } from './components/Mixer';
 import { Visualizer, VisualizerHandle } from './components/Visualizer';
 import { AudioSettings, PhysicsSettings } from './types';
 import { audioService } from './services/audioEngine';
+import iciLogo from './ici.png';
 import { 
   Waves, 
   Activity, 
@@ -219,7 +220,7 @@ const App: React.FC = () => {
              {/* Logo Container */}
              <div className="relative w-64 h-64 md:w-80 md:h-80 mb-12">
                 <img 
-                    src="ici.png" 
+                    src={iciLogo}
                     alt="Icicles Chamber" 
                     className="w-full h-full object-contain drop-shadow-2xl"
                 />
