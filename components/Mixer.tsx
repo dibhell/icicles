@@ -84,14 +84,14 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-6 shadow-lg relative mt-12 mb-20 text-[#5F665F] font-mono tracking-widest select-none">
+    <div className="w-full max-w-5xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-6 shadow-lg relative mt-12 mb-20 text-[#5F665F] font-mono tracking-widest select-none h-auto transition-all">
       
       {/* Label Top Left */}
       <div className="absolute top-4 left-6 text-[10px] text-[#7A8476] flex items-center gap-2">
         <Sliders size={12} /> MASTER CONTROL
       </div>
 
-      <div className="flex flex-row items-center justify-between h-40 pt-6 gap-2">
+      <div className="flex flex-col md:flex-row items-center justify-between pt-8 md:pt-6 gap-8 md:gap-2">
         
         {/* SECTION 1: TRANSPORT */}
         <div className="flex items-center gap-4 px-4">
@@ -111,10 +111,11 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             </button>
         </div>
 
-        <div className="w-px h-16 bg-[#B9BCB7]/50"></div>
+        <div className="hidden md:block w-px h-16 bg-[#B9BCB7]/50"></div>
+        <div className="block md:hidden w-16 h-px bg-[#B9BCB7]/50"></div>
 
         {/* SECTION 2: VOLUME */}
-        <div className="flex items-end gap-6 px-4 h-full pb-4">
+        <div className="flex items-end gap-6 px-4 h-full pb-0 md:pb-4">
              {/* Use a grid to ensure perfect horizontal alignment of tops and bottoms */}
              <div className="grid grid-cols-2 gap-x-6 gap-y-1 h-32 items-end">
                 
@@ -153,10 +154,11 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
              </div>
         </div>
 
-        <div className="w-px h-16 bg-[#B9BCB7]/50"></div>
+        <div className="hidden md:block w-px h-16 bg-[#B9BCB7]/50"></div>
+        <div className="block md:hidden w-16 h-px bg-[#B9BCB7]/50"></div>
 
         {/* SECTION 3: EQ */}
-        <div className="flex gap-4 px-6 bg-[#F2F2F0] py-4 rounded-xl border border-[#B9BCB7]/30 shadow-inner h-32 items-end">
+        <div className="flex gap-4 px-6 bg-[#F2F2F0] py-4 rounded-xl border border-[#B9BCB7]/30 shadow-inner h-32 items-end justify-center w-full md:w-auto">
              {['low', 'mid', 'high'].map((band) => (
                 <div key={band} className="flex flex-col items-center gap-2 h-full justify-between">
                      {/* Spacer for alignment with MAIN text if needed, or just justify-end */}
@@ -181,13 +183,14 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
              ))}
         </div>
 
-        <div className="w-px h-16 bg-[#B9BCB7]/50"></div>
+        <div className="hidden md:block w-px h-16 bg-[#B9BCB7]/50"></div>
+        <div className="block md:hidden w-16 h-px bg-[#B9BCB7]/50"></div>
 
         {/* SECTION 4: LOAD & FREQ */}
-        <div className="flex flex-col items-center justify-center gap-4 px-4">
+        <div className="flex flex-row md:flex-col items-center justify-center gap-6 md:gap-4 px-4 w-full md:w-auto">
              <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-6 py-2 bg-[#F2F2F0] border border-[#B9BCB7] rounded-lg hover:bg-white transition-all text-[10px] uppercase font-bold shadow-sm"
+                className="flex items-center gap-2 px-6 py-3 md:py-2 bg-[#F2F2F0] border border-[#B9BCB7] rounded-lg hover:bg-white transition-all text-[10px] uppercase font-bold shadow-sm"
              >
                 <Upload size={12} />
                 Load Sample
