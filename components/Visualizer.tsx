@@ -13,6 +13,11 @@ export interface VisualizerHandle {
   reset: () => void;
 }
 
+// --- SAFETY LIMITS (BIO STABILITY) ---
+const MAX_BUBBLES = 260;          // hard cap, tylko safety
+const BUDDING_COOLDOWN = 1400;    // ms, per bubble
+const MERGE_SKIP_PROB = 0.35;     // rzadkowanie kolizji
+
 // 3D Settings
 const DEPTH = 1000;
 const FOCAL_LENGTH = 700; 
@@ -90,6 +95,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
       vz: (Math.random() - 0.5) * 2,
       radius, color, hue: 0, charge, vertices, vertexPhases,
       deformation: { scaleX: 1, scaleY: 1, rotation: 0 }
+      lastBudding: performance.now()
     });
     
     pushLog(`SPAWN: ${id} <R:${Math.round(radius)}>`);
@@ -103,6 +109,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
     isDrawingRef.current = true;
     lastSpawnPos.current = { x, y };
     spawnBubble(x, y, 50);
+    if (bubblesRef.current.length >= MAX_BUBBLES) return;
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -499,6 +506,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
             }
 
             b.x += b.vx * tempo; b.y += b.vy * tempo; b.z += b.vz * tempo;
+            if (
+            !Number.isFinite(b.x) ||
+            !Number.isFinite(b.y) ||
+            !Number.isFinite(b.z)
+          ) {
+            b.vx = b.vy = b.vz = 0;
+          }
 
             // Restored Elasticity: Always wobbly (min 0.2), dampen extra wobble with freeze
             const elasticity = 0.25 + (0.25 * (1 - freeze));
@@ -523,16 +537,32 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
             if (wallHit && blackHole < 0.5) {
                 if ((Math.abs(b.vx) + Math.abs(b.vy) + Math.abs(b.vz)) > 0.5) triggerBubbleSound(b, 'WALL');
             }
+            const now = performance.now();
 
-            if (Math.random() < buddingChance * 0.05 && b.radius > 15) {
-                b.radius *= 0.8; spawnBubble(b.x, b.y, b.z, b.radius);
+            if (
+            Math.random() < buddingChance * 0.05 &&
+            b.radius > 15 &&
+            now - b.lastBudding > BUDDING_COOLDOWN
+          ) {
+            b.lastBudding = now;
+            b.radius *= 0.8;
+            spawnBubble(
+            b.x + Math.random() * 8 - 4,
+            b.y + Math.random() * 8 - 4,
+            b.z + Math.random() * 20,
+            b.radius
+            );
+          }
+
             }
         }
 
         // --- COLLISIONS ---
         const collisionPairs: {b1: Bubble, b2: Bubble, dist: number}[] = [];
-        for(let i=0; i<bubbles.length; i++) {
-            for(let j=i+1; j<bubbles.length; j++) {
+        for (let i = 0; i < bubbles.length; i++) {
+        if (Math.random() > MERGE_SKIP_PROB) continue; // <<< KLUCZ
+
+        for (let j = i + 1; j < bubbles.length; j++) {
                 const b1 = bubbles[i]; const b2 = bubbles[j];
                 const dx = b2.x - b1.x; const dy = b2.y - b1.y; const dz = b2.z - b1.z;
                 const distSq = dx*dx + dy*dy + dz*dz;
