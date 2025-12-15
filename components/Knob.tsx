@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface KnobProps {
     label?: string;
@@ -34,34 +34,9 @@ export const Knob: React.FC<KnobProps> = ({
     const normalized = Math.min(1, Math.max(0, (value - min) / range));
     const rotation = normalized * 270 - 135; // -135 to +135
 
-    // --- POINTER EVENTS (Unified Mouse & Touch) ---
-    // This is the modern, robust way to handle dragging.
-    // It automatically handles "drag outside" via setPointerCapture.
-    // We use touch-action: none in CSS to prevent scrolling interference.
-
-    const handlePointerDown = (e: React.PointerEvent) => {
-        // Only allow primary button (left mouse or touch)
-        if (e.button !== 0) return;
-
-        // Prevent browser defaults (text selection, scrolling initiation)
-        e.preventDefault();
-        e.stopPropagation();
-
-        setIsDragging(true);
-        startY.current = e.clientY;
-        startValue.current = value;
-        
-        // Capture pointer to track movement even if finger/mouse leaves the element
-        e.currentTarget.setPointerCapture(e.pointerId);
-    };
-
-    const handlePointerMove = (e: React.PointerEvent) => {
-        if (!isDragging) return;
-        
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const deltaY = startY.current - e.clientY; // Up is positive
+    // --- LOGIC ---
+    const processMove = (clientY: number) => {
+        const deltaY = startY.current - clientY; // Up is positive
         const sensitivity = range / 200; // 200px for full range
         
         let newValue = startValue.current + (deltaY * sensitivity);
@@ -73,12 +48,55 @@ export const Knob: React.FC<KnobProps> = ({
         onChange(newValue);
     };
 
-    const handlePointerUp = (e: React.PointerEvent) => {
-        if (isDragging) {
-            setIsDragging(false);
-            e.currentTarget.releasePointerCapture(e.pointerId);
-        }
+    // --- MOUSE EVENTS ---
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault(); // Prevent text selection
+        setIsDragging(true);
+        startY.current = e.clientY;
+        startValue.current = value;
+        document.body.style.cursor = 'ns-resize';
+        
+        window.addEventListener('mousemove', handleWindowMouseMove);
+        window.addEventListener('mouseup', handleWindowMouseUp);
     };
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+        e.preventDefault();
+        processMove(e.clientY);
+    };
+
+    const handleWindowMouseUp = () => {
+        setIsDragging(false);
+        document.body.style.cursor = '';
+        window.removeEventListener('mousemove', handleWindowMouseMove);
+        window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+
+    // --- TOUCH EVENTS ---
+    // Using touch-action: none in CSS is preferred over preventing default in JS for modern React
+    const handleTouchStart = (e: React.TouchEvent) => {
+        setIsDragging(true);
+        startY.current = e.touches[0].clientY;
+        startValue.current = value;
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        // e.preventDefault() is often problematic with passive listeners.
+        // We rely on touch-action: none css property to disable scrolling.
+        processMove(e.touches[0].clientY);
+    };
+
+    const handleTouchEnd = () => {
+        setIsDragging(false);
+    };
+
+    // Cleanup on unmount just in case
+    useEffect(() => {
+        return () => {
+            window.removeEventListener('mousemove', handleWindowMouseMove);
+            window.removeEventListener('mouseup', handleWindowMouseUp);
+        };
+    }, []);
 
     const handleDoubleClick = () => {
         if (defaultValue !== undefined) {
@@ -95,16 +113,17 @@ export const Knob: React.FC<KnobProps> = ({
     return (
         <div className="flex flex-col items-center gap-1 select-none">
              <div 
-                className="relative cursor-ns-resize group touch-none"
+                className="relative cursor-ns-resize group"
                 style={{ 
                     width: size, 
                     height: size,
-                    touchAction: 'none' // Explicit inline style for safety
+                    touchAction: 'none' // CRITICAL: This prevents scroll on mobile, enabling native-like knob control
                 }}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
+                onMouseDown={handleMouseDown}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
                 onDoubleClick={handleDoubleClick}
                 title="Double-click to reset"
             >
