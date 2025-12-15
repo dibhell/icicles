@@ -13,15 +13,18 @@ export interface VisualizerHandle {
   reset: () => void;
 }
 
-// --- SAFETY LIMITS (BIO STABILITY) ---
-const MAX_BUBBLES = 260;          // hard cap, tylko safety
-const BUDDING_COOLDOWN = 1400;    // ms, per bubble
-const MERGE_SKIP_PROB = 0.35;     // rzadkowanie kolizji
-
 // 3D Settings
 const DEPTH = 1000;
 const FOCAL_LENGTH = 700; 
 const VERTEX_COUNT = 8; 
+
+// <<< FIX: safety caps for biology/perf (NO DESIGN CHANGE)
+const MAX_BUBBLES = 260;
+const BUDDING_COOLDOWN_MS = 1400;
+const MERGE_SKIP_PROB = 0.35;
+
+// <<< FIX: extend Bubble locally without touching shared ../types
+type BubbleExt = Bubble & { lastBudding?: number };
 
 export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPlaying, physics, audioSettings }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,7 +32,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
   
   const physicsRef = useRef<PhysicsSettings>(physics);
   const audioSettingsRef = useRef<AudioSettings>(audioSettings);
-  const bubblesRef = useRef<Bubble[]>([]);
+  const bubblesRef = useRef<BubbleExt[]>([]); // <<< FIX: BubbleExt
   const particlesRef = useRef<Particle[]>([]);
   const requestRef = useRef<number | null>(null);
   const isPlayingRef = useRef<boolean>(isPlaying);
@@ -73,6 +76,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
   };
 
   const spawnBubble = (x: number, y: number, z: number = 0, r?: number) => {
+    // <<< FIX: hard cap to prevent fork-bomb from mitosis
+    if (bubblesRef.current.length >= MAX_BUBBLES) return;
+
     const variants = [
         'hsla(60, 5%, 95%, 1)',   // Snow White
         'hsla(180, 10%, 85%, 1)', // Icy Grey
@@ -94,7 +100,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
       vy: (Math.random() - 0.5) * 2,
       vz: (Math.random() - 0.5) * 2,
       radius, color, hue: 0, charge, vertices, vertexPhases,
-      deformation: { scaleX: 1, scaleY: 1, rotation: 0 }
+      deformation: { scaleX: 1, scaleY: 1, rotation: 0 },
+
+      // <<< FIX: cooldown stamp (local extension)
       lastBudding: performance.now()
     });
     
@@ -109,7 +117,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
     isDrawingRef.current = true;
     lastSpawnPos.current = { x, y };
     spawnBubble(x, y, 50);
-    if (bubblesRef.current.length >= MAX_BUBBLES) return;
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -134,7 +141,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
     lastSpawnPos.current = null;
   };
 
-  const triggerBubbleSound = (b: Bubble, triggerType: string) => {
+  const triggerBubbleSound = (b: BubbleExt, triggerType: string) => {
     const phys = physicsRef.current;
     const audio = audioSettingsRef.current;
     const isReverse = Math.random() < phys.reverseChance;
@@ -233,18 +240,18 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
       
       params.forEach(p => {
           if (p.startsWith('//')) {
-             ctx.fillStyle = '#5F665F'; // Darker for headers
+             ctx.fillStyle = '#5F665F'; 
           } else {
-             ctx.fillStyle = '#7A8476'; // Standard
+             ctx.fillStyle = '#7A8476';
           }
           ctx.fillText(p, w - 15, y);
-          y += 12; // Tighter spacing to fit everything
+          y += 12;
       });
 
       ctx.restore();
   };
 
-  const drawAmoeba = (ctx: CanvasRenderingContext2D, b: Bubble, w: number, h: number, blurAmount: number) => {
+  const drawAmoeba = (ctx: CanvasRenderingContext2D, b: BubbleExt, w: number, h: number, blurAmount: number) => {
     const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
     const cx = w / 2; const cy = h / 2;
     const x2d = (b.x - cx) * scale + cx;
@@ -260,7 +267,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
     
     ctx.beginPath();
     const angleStep = (Math.PI * 2) / VERTEX_COUNT;
-    const points = [];
+    const points: {x:number;y:number}[] = [];
     for(let i=0; i<VERTEX_COUNT; i++) {
         const r = r2d * b.vertices[i];
         const a = i * angleStep;
@@ -285,7 +292,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
     ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.stroke();
     
-    // Bubble ID Label (Tiny)
     if (b.radius > 40) {
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.font = '8px monospace';
@@ -348,9 +354,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
     ctx.restore();
   };
 
-  const drawHUD = (ctx: CanvasRenderingContext2D, pairs: {b1: Bubble, b2: Bubble}[], w: number, h: number) => {
+  const drawHUD = (ctx: CanvasRenderingContext2D, pairs: {b1: BubbleExt, b2: BubbleExt}[], w: number, h: number) => {
     ctx.save();
-    // RESTORED READABLE FONT for Coordinates
     ctx.font = '10px "Courier New", monospace'; 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -372,7 +377,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
        
        const info = `[X:${Math.round((b1.x+b2.x)/2)} Y:${Math.round((b1.y+b2.y)/2)} Z:${Math.round((b1.z+b2.z)/2)}]`;
        
-       // Draw little box behind text
        const textWidth = ctx.measureText(info).width;
        ctx.fillStyle = 'rgba(242, 242, 240, 0.8)';
        ctx.fillRect(mx - textWidth/2 - 2, my - 14, textWidth + 4, 12);
@@ -491,7 +495,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
                     if (distSq > 150000 || distSq < 100) continue; 
                     const baseForce = 200 / distSq; 
                     const chargeFactor = b.charge * other.charge; 
-                    let forceDirection = magIntensity > 0 ? -1 * magIntensity * (chargeFactor < 0 ? 1.5 : 0.5) : 1 * Math.abs(magIntensity) * (chargeFactor > 0 ? 1.5 : 0.5);
+                    let forceDirection = magIntensity > 0
+                      ? -1 * magIntensity * (chargeFactor < 0 ? 1.5 : 0.5)
+                      : 1 * Math.abs(magIntensity) * (chargeFactor > 0 ? 1.5 : 0.5);
                     const force = baseForce * forceDirection;
                     const dist = Math.sqrt(distSq);
                     b.vx -= (dx / dist) * force; b.vy -= (dy / dist) * force; b.vz -= (dz / dist) * force;
@@ -506,14 +512,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
             }
 
             b.x += b.vx * tempo; b.y += b.vy * tempo; b.z += b.vz * tempo;
-            if (
-            !Number.isFinite(b.x) ||
-            !Number.isFinite(b.y) ||
-            !Number.isFinite(b.z)
-          ) {
-            b.vx = b.vy = b.vz = 0;
-          }
 
+            // <<< FIX: NaN/Inf safety (invisible)
+            if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.z)) {
+                b.vx = b.vy = b.vz = 0;
+                // don’t continue; keep drawing in place
+            }
+            
             // Restored Elasticity: Always wobbly (min 0.2), dampen extra wobble with freeze
             const elasticity = 0.25 + (0.25 * (1 - freeze));
             for(let j=0; j<VERTEX_COUNT; j++) {
@@ -537,32 +542,31 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
             if (wallHit && blackHole < 0.5) {
                 if ((Math.abs(b.vx) + Math.abs(b.vy) + Math.abs(b.vz)) > 0.5) triggerBubbleSound(b, 'WALL');
             }
+
+            // <<< FIX: budding cooldown (same behavior, stops exponential blow-up)
             const now = performance.now();
+            if (b.lastBudding == null) b.lastBudding = now;
 
-            if (
-            Math.random() < buddingChance * 0.05 &&
-            b.radius > 15 &&
-            now - b.lastBudding > BUDDING_COOLDOWN
-          ) {
-            b.lastBudding = now;
-            b.radius *= 0.8;
-            spawnBubble(
-            b.x + Math.random() * 8 - 4,
-            b.y + Math.random() * 8 - 4,
-            b.z + Math.random() * 20,
-            b.radius
-            );
-          }
-
+            if (Math.random() < buddingChance * 0.05 && b.radius > 15 && (now - b.lastBudding) > BUDDING_COOLDOWN_MS) {
+                b.lastBudding = now;
+                b.radius *= 0.8;
+                spawnBubble(
+                  b.x + Math.random() * 8 - 4,
+                  b.y + Math.random() * 8 - 4,
+                  b.z + Math.random() * 20,
+                  b.radius
+                );
             }
         }
 
         // --- COLLISIONS ---
-        const collisionPairs: {b1: Bubble, b2: Bubble, dist: number}[] = [];
-        for (let i = 0; i < bubbles.length; i++) {
-        if (Math.random() > MERGE_SKIP_PROB) continue; // <<< KLUCZ
+        const collisionPairs: {b1: BubbleExt, b2: BubbleExt, dist: number}[] = [];
+        for(let i=0; i<bubbles.length; i++) {
 
-        for (let j = i + 1; j < bubbles.length; j++) {
+            // <<< FIX: optional rzadkowanie tylko gdy robi się gorąco (perf safety)
+            if (bubbles.length > 220 && Math.random() > MERGE_SKIP_PROB) continue;
+
+            for(let j=i+1; j<bubbles.length; j++) {
                 const b1 = bubbles[i]; const b2 = bubbles[j];
                 const dx = b2.x - b1.x; const dy = b2.y - b1.y; const dz = b2.z - b1.z;
                 const distSq = dx*dx + dy*dy + dz*dz;
@@ -573,12 +577,19 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
                 
                 if (dist < minDist) {
                     if (Math.random() < cannibalism) {
+
+                        // <<< FIX: prevent "merge storm" from pushing radius to NaN via invalid math
+                        if (b1.radius <= 0 || b2.radius <= 0) continue;
+
                         if (b1.radius > b2.radius) {
-                            b1.radius = Math.pow(Math.pow(b1.radius, 3) + Math.pow(b2.radius, 3), 1/3); b2.radius = 0; 
+                            b1.radius = Math.pow(Math.pow(b1.radius, 3) + Math.pow(b2.radius, 3), 1/3);
+                            b2.radius = 0; 
                         } else {
-                            b2.radius = Math.pow(Math.pow(b1.radius, 3) + Math.pow(b2.radius, 3), 1/3); b1.radius = 0;
+                            b2.radius = Math.pow(Math.pow(b1.radius, 3) + Math.pow(b2.radius, 3), 1/3);
+                            b1.radius = 0;
                         }
                         triggerBubbleSound(b1, 'ABSORB');
+
                     } else {
                         const nx = dx / dist; const ny = dy / dist; const nz = dz / dist;
                         const rvx = b2.vx - b1.vx; const rvy = b2.vy - b1.vy; const rvz = b2.vz - b1.vz;
@@ -597,6 +608,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ isPla
                     }
                 }
             }
+        }
+
+        // <<< FIX: hard cap cleanup (only removes dead radius=0 after merges)
+        if (bubbles.length > MAX_BUBBLES) {
+          for (let k = bubbles.length - 1; k >= 0 && bubbles.length > MAX_BUBBLES; k--) {
+            if (bubbles[k].radius <= 0) bubbles.splice(k, 1);
+          }
         }
 
         bubbles.sort((a, b) => b.z - a.z);
