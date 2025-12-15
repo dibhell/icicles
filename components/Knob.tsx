@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface KnobProps {
   label?: string;
@@ -23,37 +23,27 @@ export const Knob: React.FC<KnobProps> = ({
   onChange,
   format,
   color = '#7A8476',
-  size = 48
+  size = 48,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const startY = useRef(0);
   const startValue = useRef(0);
 
   const range = max - min;
-  const normalized = Math.min(1, Math.max(0, (value - min) / range));
+  const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
   const rotation = normalized * 270 - 135;
 
   const processMove = (clientY: number) => {
-    const deltaY = startY.current - clientY;
-    const sensitivity = range / 200;
+    const deltaY = startY.current - clientY; // up = positive
+    const sensitivity = range / 200; // 200px for full range
     let next = startValue.current + deltaY * sensitivity;
+
     next = Math.round(next / step) * step;
     next = Math.max(min, Math.min(max, next));
     onChange(next);
   };
 
   // ---------- MOUSE ----------
-  const onMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    startY.current = e.clientY;
-    startValue.current = value;
-    document.body.style.cursor = 'ns-resize';
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  };
-
   const onMouseMove = (e: MouseEvent) => {
     processMove(e.clientY);
   };
@@ -65,6 +55,17 @@ export const Knob: React.FC<KnobProps> = ({
     window.removeEventListener('mouseup', onMouseUp);
   };
 
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    startY.current = e.clientY;
+    startValue.current = value;
+    document.body.style.cursor = 'ns-resize';
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
   // ---------- TOUCH ----------
   const onTouchStart = (e: React.TouchEvent) => {
     setIsDragging(true);
@@ -73,7 +74,8 @@ export const Knob: React.FC<KnobProps> = ({
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
-    e.preventDefault(); // KLUCZOWE
+    // kluczowe: tylko gdy kręcisz, blokuj natywne przewijanie
+    e.preventDefault();
     processMove(e.touches[0].clientY);
   };
 
@@ -85,13 +87,16 @@ export const Knob: React.FC<KnobProps> = ({
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onDoubleClick = () => {
     if (defaultValue !== undefined) onChange(defaultValue);
   };
 
+  // SVG arc
   const r = size / 2 - 4;
   const dashArray = 2 * Math.PI * r;
   const dashOffset = dashArray - normalized * (dashArray * 0.75);
@@ -100,8 +105,67 @@ export const Knob: React.FC<KnobProps> = ({
   return (
     <div className="flex flex-col items-center gap-1 select-none">
       <div
-        className="relative cursor-ns-resize"
+        className="relative cursor-ns-resize group"
         style={{
           width: size,
           height: size,
-          touch
+          // nie zabijaj scrolla zawsze; tylko podczas drag
+          touchAction: isDragging ? 'none' : 'pan-y',
+        }}
+        onMouseDown={onMouseDown}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        onDoubleClick={onDoubleClick}
+        title="Double-click to reset"
+      >
+        <svg width={size} height={size} className="transform rotate-90 drop-shadow-sm pointer-events-none">
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="#D9DBD6"
+            strokeWidth={strokeWidth}
+            strokeDasharray={dashArray}
+            strokeDashoffset={dashArray * 0.25}
+            strokeLinecap="round"
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeDasharray={dashArray}
+            strokeDashoffset={dashOffset}
+            strokeLinecap="round"
+            className="transition-all duration-75 ease-out"
+            style={{ opacity: 0.9, filter: `drop-shadow(0 0 2px ${color}40)` }}
+          />
+        </svg>
+
+        <div
+          className="absolute top-0 left-0 w-full h-full flex items-center justify-center pointer-events-none"
+          style={{ transform: `rotate(${rotation}deg)` }}
+        >
+          <div
+            className="bg-[#F2F2F0] rounded-full absolute -top-[10%] shadow-sm border border-[#B9BCB7]"
+            style={{ width: strokeWidth, height: strokeWidth * 2.5 }}
+          />
+        </div>
+      </div>
+
+      <div className="text-center">
+        {label && <div className="text-[9px] font-bold text-[#7A8476] uppercase tracking-wider">{label}</div>}
+        <div className={`text-[10px] font-mono font-bold ${isDragging ? 'text-[#3F453F]' : 'text-[#5F665F]'}`}>
+          {format ? format(value) : value.toFixed(2)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Knob;
