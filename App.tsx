@@ -88,7 +88,7 @@ const App: React.FC = () => {
     reverse: 0.0,
     tuning: 0.5,
     blackHole: 0.0,
-    doppler: 0.5,
+    doppler: 0.0,
     pingPong: 0.0,
     weakness: 0.0,
     magneto: 0.5,
