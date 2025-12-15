@@ -34,9 +34,34 @@ export const Knob: React.FC<KnobProps> = ({
     const normalized = Math.min(1, Math.max(0, (value - min) / range));
     const rotation = normalized * 270 - 135; // -135 to +135
 
-    // --- COMMON LOGIC ---
-    const processMove = (clientY: number) => {
-        const deltaY = startY.current - clientY; // Up is positive
+    // --- POINTER EVENTS (Unified Mouse & Touch) ---
+    // This is the modern, robust way to handle dragging.
+    // It automatically handles "drag outside" via setPointerCapture.
+    // We use touch-action: none in CSS to prevent scrolling interference.
+
+    const handlePointerDown = (e: React.PointerEvent) => {
+        // Only allow primary button (left mouse or touch)
+        if (e.button !== 0) return;
+
+        // Prevent browser defaults (text selection, scrolling initiation)
+        e.preventDefault();
+        e.stopPropagation();
+
+        setIsDragging(true);
+        startY.current = e.clientY;
+        startValue.current = value;
+        
+        // Capture pointer to track movement even if finger/mouse leaves the element
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+
+    const handlePointerMove = (e: React.PointerEvent) => {
+        if (!isDragging) return;
+        
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const deltaY = startY.current - e.clientY; // Up is positive
         const sensitivity = range / 200; // 200px for full range
         
         let newValue = startValue.current + (deltaY * sensitivity);
@@ -48,46 +73,11 @@ export const Knob: React.FC<KnobProps> = ({
         onChange(newValue);
     };
 
-    // --- MOUSE EVENTS ---
-    const handleMouseMove = (e: MouseEvent) => {
-        e.preventDefault();
-        processMove(e.clientY);
-    };
-
-    const handleMouseUp = () => {
-        setIsDragging(false);
-        document.body.style.cursor = '';
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        if (e.button !== 0) return; // Left click only
-        
-        setIsDragging(true);
-        startY.current = e.clientY;
-        startValue.current = value;
-        document.body.style.cursor = 'ns-resize';
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-    };
-
-    // --- TOUCH EVENTS (Mobile) ---
-    // Note: We rely on the 'touch-none' CSS class to handle scroll locking natively.
-    // We avoid e.preventDefault() here to prevent "passive event listener" errors in the console.
-    
-    const handleTouchStart = (e: React.TouchEvent) => {
-        setIsDragging(true);
-        startY.current = e.touches[0].clientY;
-        startValue.current = value;
-    };
-
-    const handleTouchMove = (e: React.TouchEvent) => {
-        processMove(e.touches[0].clientY);
-    };
-
-    const handleTouchEnd = () => {
-        setIsDragging(false);
+    const handlePointerUp = (e: React.PointerEvent) => {
+        if (isDragging) {
+            setIsDragging(false);
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        }
     };
 
     const handleDoubleClick = () => {
@@ -106,12 +96,15 @@ export const Knob: React.FC<KnobProps> = ({
         <div className="flex flex-col items-center gap-1 select-none">
              <div 
                 className="relative cursor-ns-resize group touch-none"
-                style={{ width: size, height: size }}
-                onMouseDown={handleMouseDown}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                onTouchCancel={handleTouchEnd}
+                style={{ 
+                    width: size, 
+                    height: size,
+                    touchAction: 'none' // Explicit inline style for safety
+                }}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
                 onDoubleClick={handleDoubleClick}
                 title="Double-click to reset"
             >
