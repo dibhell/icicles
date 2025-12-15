@@ -27,66 +27,74 @@ export const Knob: React.FC<KnobProps> = ({
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   
-  // We store interaction state in refs to avoid re-renders during calculation
-  // and to maintain absolute tracking logic.
-  const state = useRef({
+  // Internal state to track the RAW drag value before snapping.
+  // This prevents the "stair-stepping" lag effect where small mouse movements
+  // get lost because they don't cross the next 'step' threshold immediately.
+  const dragInfo = useRef({
     startY: 0,
     startValue: 0,
+    currentRawValue: 0 // High precision value
   });
 
   // --- MATH HELPERS ---
   const range = max - min;
   const normalized = range <= 0 ? 0 : Math.min(1, Math.max(0, (value - min) / range));
-  // Rotation: -135deg (min) to +135deg (max)
   const rotation = normalized * 270 - 135;
 
-  // --- POINTER EVENTS (Unified Mouse & Touch) ---
+  // --- POINTER EVENTS ---
   
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
 
     setIsDragging(true);
-    
-    // Capture pointer: This is crucial. It ensures we keep receiving events
-    // even if the mouse/finger leaves the element boundaries.
     e.currentTarget.setPointerCapture(e.pointerId);
 
-    state.current = {
+    dragInfo.current = {
       startY: e.clientY,
-      startValue: value, // We track from where you clicked
+      startValue: value,
+      currentRawValue: value
     };
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging) return;
     e.preventDefault();
+    e.stopPropagation();
 
-    const { startY, startValue } = state.current;
+    const { startY, startValue } = dragInfo.current;
     
-    // Sensitivity: How many pixels to drag for full range?
-    // 125px feels responsive on desktop without being twitchy.
-    const pixelRange = 125; 
+    // Sensitivity: Pixels required for full range rotation.
+    // Standard VST feel is around 150-200px.
+    let pixelRange = 150; 
     
-    // Delta Y: Up is negative in screen coords, but we want Up to increase value.
-    const deltaY = startY - e.clientY; 
-    
-    // Calculate raw change based on percentage of pixelRange
-    const change = (deltaY / pixelRange) * range;
-    let newValue = startValue + change;
-
-    // Logic: Apply step, but prevent "stickiness"
-    // If step is defined, we snap.
-    if (step > 0) {
-      newValue = Math.round(newValue / step) * step;
+    // Shift key for fine-tuning (Precision Mode)
+    if (e.shiftKey) {
+        pixelRange *= 5; // 5x slower movement for precision
     }
 
-    // Clamp limits
-    newValue = Math.max(min, Math.min(max, newValue));
+    const deltaY = startY - e.clientY; // Up is positive
+    
+    // Calculate precise float change
+    const deltaValue = (deltaY / pixelRange) * range;
+    let rawNewValue = startValue + deltaValue;
 
-    // Optimization: Only update if value actually changed (float comparison)
-    if (Math.abs(newValue - value) >= (step / 2)) {
-      onChange(newValue);
+    // Clamp RAW value to ensure we don't drift endlessly past min/max
+    rawNewValue = Math.max(min, Math.min(max, rawNewValue));
+    dragInfo.current.currentRawValue = rawNewValue;
+
+    // Apply Step Snapping ONLY for the output
+    let outputValue = rawNewValue;
+    if (step > 0) {
+      outputValue = Math.round(rawNewValue / step) * step;
+    }
+
+    // Final Clamp
+    outputValue = Math.max(min, Math.min(max, outputValue));
+
+    // Fire event (removed the threshold check to ensure instant feedback)
+    if (outputValue !== value) {
+      onChange(outputValue);
     }
   };
 
@@ -113,15 +121,14 @@ export const Knob: React.FC<KnobProps> = ({
           width: size,
           height: size,
           cursor: isDragging ? 'ns-resize' : 'pointer',
-          // CRITICAL: Tells browser not to handle gestures/scrolling on this element
           touchAction: 'none' 
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp} // Handle interruption
+        onPointerCancel={handlePointerUp}
         onDoubleClick={handleDoubleClick}
-        title="Drag up/down | Double-click reset"
+        title="Drag up/down | Shift+Drag for precision | Double-click reset"
       >
         <svg 
           width={size} 
