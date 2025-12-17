@@ -1,20 +1,27 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Icicles Chamber
 
-# Run and deploy your AI Studio app
+![Icicles Chamber](public/ici.png)
 
-This contains everything you need to run your app locally.
+Generatywna aplikacja audio-wizualna w przegladarce. Tworzysz lodowe kulki,
+ktore poruszaja sie w przestrzeni 3D i uruchamiaja dzwieki przy zderzeniach.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1WJWw2777OIHFHb1sCgFIUaagzntBUrG8
+## O co chodzi
+- Interaktywna scena Canvas z kulkami/amoebami w przestrzeni 3D.
+- Dzwiek generowany przez Web Audio (synteza lub wczytany sample).
+- Pokretla steruja fizyka, przestrzenia i zachowaniem obiektow.
+- Mixer z transportem, glosnoscia, EQ i miernikiem VU.
 
-## Run Locally
+## Uruchomienie lokalne
+1. `npm install`
+2. `npm run dev`
+3. Otworz `http://localhost:5173`
+4. Kliknij "Enter Chamber", aby odblokowac audio (wymog przegladarek).
 
-**Prerequisites:**  Node.js
+## Dokumentacja
+- [docs/STEROWANIE.md](docs/STEROWANIE.md) - opis kontrolek i gestow.
+- [docs/ARCHITEKTURA.md](docs/ARCHITEKTURA.md) - struktura kodu i modulow.
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Technologie
+- React 19, TypeScript, Vite
+- Web Audio API, Canvas 2D
+- Tailwind (CDN)
