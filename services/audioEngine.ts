@@ -212,7 +212,6 @@ class AudioEngine {
 
     const unlock = async () => {
       this.lastUserGestureAt = performance.now();
-      if (!this.shouldPlay) return;
       await this.resume();
       if (this.ctx && this.ctx.state === 'running') {
         window.removeEventListener('pointerdown', unlock);
