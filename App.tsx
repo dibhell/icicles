@@ -114,6 +114,7 @@ const App: React.FC = () => {
     reverbWet: 0.3,
     baseFrequency: 440,
     pingPongWet: 0.0,
+    sampleGain: 1,
     compThreshold: -12,
     compRatio: 3,
     compAttack: 0.005,   // 5ms
