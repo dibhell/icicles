@@ -17,6 +17,11 @@ const TRACK_BOTTOM = 8;
 const THUMB_RADIUS = 8;
 const HITBOX_MIN_W = 36;
 const FADER_HEIGHT = 180;
+const LABEL_ROW_H = 10;
+const VALUE_ROW_H = 10;
+const CONTROL_ZONE_H = LABEL_ROW_H + FADER_HEIGHT + VALUE_ROW_H;
+const CONTROL_COL_W = 72;
+const FADER_TRACK_W = 10; // align with VU meter width
 
 type FaderProps = {
   value: number;
@@ -92,7 +97,7 @@ const Fader: React.FC<FaderProps> = ({ value, min, max, defaultValue, onChange, 
     <div className="relative flex items-center justify-center" style={{ height: FADER_HEIGHT, width: HITBOX_MIN_W }}>
       <div
         className="pointer-events-none absolute"
-        style={{ top: TRACK_TOP, bottom: TRACK_BOTTOM, left: '50%', transform: 'translateX(-50%)', width: 6, backgroundColor: '#B9BCB7', borderRadius: 999 }}
+        style={{ top: TRACK_TOP, bottom: TRACK_BOTTOM, left: '50%', transform: 'translateX(-50%)', width: FADER_TRACK_W, backgroundColor: '#B9BCB7', borderRadius: 999 }}
       />
       <div
         className="pointer-events-none absolute bg-[#7A8476] rounded-full shadow-sm"
@@ -106,6 +111,26 @@ const Fader: React.FC<FaderProps> = ({ value, min, max, defaultValue, onChange, 
     </div>
   );
 };
+
+type ControlColumnProps = {
+  label: string;
+  bottom: React.ReactNode;
+  children: React.ReactNode;
+};
+
+const ControlColumn: React.FC<ControlColumnProps> = ({ label, bottom, children }) => (
+  <div
+    className="grid justify-items-center"
+    style={{
+      width: CONTROL_COL_W,
+      gridTemplateRows: `${LABEL_ROW_H}px ${FADER_HEIGHT}px ${VALUE_ROW_H}px`,
+    }}
+  >
+    <div className="w-full text-center text-[8px] uppercase opacity-60 leading-none flex items-end justify-center">{label}</div>
+    <div className="flex items-center justify-center">{children}</div>
+    <div className="w-full text-center text-[9px] opacity-60 leading-none flex items-start justify-center tabular-nums">{bottom}</div>
+  </div>
+);
 
 export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, onPlayPause, onStop }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -306,11 +331,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         </div>
 
         {/* MIC */}
-        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-2">
-          <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">Mic</div>
-          <div className="grid grid-cols-2 items-center justify-center gap-3 h-[200px]">
-            <div className="w-16 flex flex-col items-center gap-1">
-              <span className="text-[8px] uppercase opacity-60">Gain</span>
+        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 grid gap-2" style={{ gridTemplateRows: '16px 1fr' }}>
+          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">Mic</div>
+          <div className="grid grid-cols-2 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
+            <ControlColumn label="Gain" bottom={`${(micGain * 25).toFixed(0)}%`}>
               <Fader
                 value={micGain}
                 min={0}
@@ -321,32 +345,24 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                   audioService.setMicGain(v);
                 }}
               />
-              <span className="text-[9px] opacity-60 w-10 text-center">{(micGain * 25).toFixed(0)}%</span>
-            </div>
-            <div className="w-16 flex flex-col items-center gap-1">
-              <span className="text-[8px] uppercase opacity-60">VU</span>
-              <canvas ref={micVURef} width={10} height={FADER_HEIGHT} className="rounded-sm bg-black/5 h-[180px] w-2.5" />
-              <span className="text-[9px] opacity-60">dB</span>
-            </div>
+            </ControlColumn>
+            <ControlColumn label="VU" bottom="dB">
+              <canvas ref={micVURef} width={FADER_TRACK_W} height={FADER_HEIGHT} className="rounded-sm bg-black/5" style={{ height: FADER_HEIGHT, width: FADER_TRACK_W }} />
+            </ControlColumn>
           </div>
         </div>
 
         {/* OUT */}
-        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-3">
-          <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">Out</div>
-          <div className="grid grid-cols-3 items-end justify-center gap-3 h-[200px]">
-            <div className="w-16 flex flex-col items-center gap-1">
-              <span className="text-[8px] uppercase opacity-60">Peak</span>
-              <canvas ref={peakCanvasRef} width={10} height={FADER_HEIGHT} className="rounded-sm bg-black/5 h-[180px] w-2.5" />
-              <span className="text-[9px] opacity-60">dB</span>
-            </div>
-            <div className="w-16 flex flex-col items-center gap-1">
-              <span className="text-[8px] uppercase opacity-60">Main</span>
-              <canvas ref={mainCanvasRef} width={10} height={FADER_HEIGHT} className="rounded-sm bg-black/5 h-[180px] w-2.5" />
-              <span className="text-[9px] opacity-60">dB</span>
-            </div>
-            <div className="w-16 flex flex-col items-center gap-1">
-              <span className="text-[8px] uppercase opacity-60">Level</span>
+        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 grid gap-2" style={{ gridTemplateRows: '16px 1fr' }}>
+          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">Out</div>
+          <div className="grid grid-cols-3 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
+            <ControlColumn label="Peak" bottom="dB">
+              <canvas ref={peakCanvasRef} width={FADER_TRACK_W} height={FADER_HEIGHT} className="rounded-sm bg-black/5" style={{ height: FADER_HEIGHT, width: FADER_TRACK_W }} />
+            </ControlColumn>
+            <ControlColumn label="Main" bottom="dB">
+              <canvas ref={mainCanvasRef} width={FADER_TRACK_W} height={FADER_HEIGHT} className="rounded-sm bg-black/5" style={{ height: FADER_HEIGHT, width: FADER_TRACK_W }} />
+            </ControlColumn>
+            <ControlColumn label="Level" bottom={`${(settings.volume * 100).toFixed(0)}%`}>
               <Fader
                 value={settings.volume}
                 min={0}
@@ -354,27 +370,24 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                 defaultValue={0.7}
                 onChange={(v) => setSettings(p => ({ ...p, volume: v }))}
               />
-              <span className="text-[9px] opacity-60 w-10 text-center">{(settings.volume * 100).toFixed(0)}%</span>
-            </div>
+            </ControlColumn>
           </div>
         </div>
 
         {/* EQ */}
-        <div className="min-w-0 bg-[#E4E5E2] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-2 shadow-inner">
-          <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">EQ</div>
-          <div className="grid grid-cols-3 items-end justify-center gap-3 h-[200px]">
-            {['low', 'mid', 'high'].map((band) => (
-              <div key={band} className="w-16 flex flex-col items-center gap-1">
-                <span className="text-[8px] uppercase opacity-60">{band}</span>
+        <div className="min-w-0 bg-[#E4E5E2] rounded-2xl border border-[#C7C9C5] p-4 grid gap-2 shadow-inner" style={{ gridTemplateRows: '16px 1fr' }}>
+          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">EQ</div>
+          <div className="grid grid-cols-3 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
+            {(['low', 'mid', 'high'] as const).map((band) => (
+              <ControlColumn key={band} label={band} bottom={`${(settings[band] as number).toFixed(1)}dB`}>
                 <Fader
-                  value={settings[band as keyof AudioSettings] as number}
+                  value={settings[band] as number}
                   min={-10}
                   max={10}
                   defaultValue={0}
-                  onChange={(v) => handleEQChange(band as any, v)}
+                  onChange={(v) => handleEQChange(band, v)}
                 />
-                <span className="text-[9px] opacity-60 w-14 text-center">{(settings[band as keyof AudioSettings] as number).toFixed(1)}dB</span>
-              </div>
+              </ControlColumn>
             ))}
           </div>
         </div>
