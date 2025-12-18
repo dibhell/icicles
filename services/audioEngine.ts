@@ -575,6 +575,10 @@ class AudioEngine {
     return this.customBuffer != null && this.soundType === SoundType.SAMPLE;
   }
 
+  public setSoundType(mode: SoundType) {
+    this.soundType = mode;
+  }
+
   public triggerSound(
     sizeFactor: number, 
     baseFreq: number, 
@@ -584,7 +588,8 @@ class AudioEngine {
     dopplerIntensity: number = 0,
     isReverse: boolean = false, 
     volume: number = 0.5,
-    music?: MusicSettings
+    music?: MusicSettings,
+    sampleGain: number = 1
   ) {
     if (!this.ctx) return;
     if (this.ctx.state !== 'running') {
@@ -707,7 +712,7 @@ class AudioEngine {
         source.playbackRate.setValueAtTime(Math.max(0.1, Math.min(rate, 4.0)), now);
         
         // Start envelope
-        sourceGain.gain.setValueAtTime(peakVol, now);
+        sourceGain.gain.setValueAtTime(peakVol * safeSampleGain, now);
         // Exponential fade out
         sourceGain.gain.exponentialRampToValueAtTime(EPSILON, now + (this.customBuffer.duration / rate));
         

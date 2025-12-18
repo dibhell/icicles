@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { AudioSettings } from '../types';
+import { AudioSettings, SoundType } from '../types';
 import { Play, Pause, Square, Upload, Sliders, Circle, Mic2, XCircle } from 'lucide-react';
 import { audioService } from '../services/audioEngine';
 import { BufferedKnob } from './BufferedKnob';
@@ -23,8 +23,12 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   const recorderTimerRef = useRef<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [sampleLoaded, setSampleLoaded] = useState<boolean>(audioService.isSampleLoaded());
+  const [micLoaded, setMicLoaded] = useState<boolean>(false);
   const micVURef = useRef<HTMLCanvasElement>(null);
   const [micGain, setMicGain] = useState(1);
+  const [micAvailable, setMicAvailable] = useState(false);
+  const [sampleAvailable, setSampleAvailable] = useState(sampleLoaded);
+  const [sourceMode, setSourceMode] = useState<'synth' | 'mic' | 'sample'>(sampleLoaded ? 'sample' : 'synth');
 
   const handleEQChange = (band: 'low' | 'mid' | 'high', val: number) => {
     // Val is 0-100 from range input, map to -10 to 10 dB
@@ -34,7 +38,16 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      audioService.loadSample(e.target.files[0]).then(() => setSampleLoaded(audioService.isSampleLoaded()));
+      audioService.loadSample(e.target.files[0]).then(() => {
+        const loaded = audioService.isSampleLoaded();
+        setSampleLoaded(loaded);
+        setSampleAvailable(loaded);
+        setMicAvailable(false);
+        if (loaded) {
+          setSourceMode('sample');
+          audioService.setSoundType(SoundType.SAMPLE);
+        }
+      });
     }
   };
 
@@ -69,7 +82,14 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
           recorderTimerRef.current = null;
         }
         await audioService.loadSampleBlob(blob);
-        setSampleLoaded(audioService.isSampleLoaded());
+        const loaded = audioService.isSampleLoaded();
+        setSampleLoaded(loaded);
+        setMicAvailable(loaded);
+        setSampleAvailable(false);
+        if (loaded) {
+          setSourceMode('mic');
+          audioService.setSoundType(SoundType.SAMPLE);
+        }
       };
 
       rec.start();
@@ -87,6 +107,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   const handleClearSample = () => {
     audioService.clearSample();
     setSampleLoaded(false);
+    setMicAvailable(false);
+    setSampleAvailable(false);
+    setSourceMode('synth');
+    audioService.setSoundType(SoundType.SYNTH);
   };
 
   useEffect(() => {
@@ -133,13 +157,32 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
     };
   }, []);
 
-  // Standard style for vertical range inputs
-  const verticalRangeStyle: React.CSSProperties = {
-    writingMode: 'vertical-lr',
-    direction: 'rtl', 
-    appearance: 'auto',
-    width: '100%' // Helps align hit area in some browsers
+  const FADER_HEIGHT = 180;
+
+  const selectSource = (mode: 'synth' | 'mic' | 'sample') => {
+    if (mode === 'synth') {
+      setSourceMode('synth');
+      audioService.setSoundType(SoundType.SYNTH);
+      return;
+    }
+    if (mode === 'mic') {
+      if (!micAvailable) return;
+      setSourceMode('mic');
+      audioService.setSoundType(SoundType.SAMPLE);
+      return;
+    }
+    if (mode === 'sample') {
+      if (!sampleAvailable) return;
+      setSourceMode('sample');
+      audioService.setSoundType(SoundType.SAMPLE);
+    }
   };
+
+  const loadedLabel = (() => {
+    if (sourceMode === 'mic' && micAvailable) return 'MIC SAMPLE';
+    if (sourceMode === 'sample' && sampleAvailable) return 'FILE SAMPLE';
+    return 'DEFAULT SYNTH';
+  })();
 
   return (
     <div className="w-full max-w-5xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-6 shadow-lg relative mt-6 mb-14 text-[#5F665F] font-mono tracking-widest select-none h-auto transition-all">

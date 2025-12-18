@@ -8,6 +8,7 @@ export interface AudioSettings {
   reverbWet: number; // 0 to 1
   baseFrequency: number; // Hz
   pingPongWet: number; // 0 to 1
+  sampleGain?: number; // 0..2 multiplier for samples
   compThreshold?: number; // dB
   compRatio?: number;
   compAttack?: number; // seconds
