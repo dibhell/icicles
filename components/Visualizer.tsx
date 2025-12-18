@@ -35,8 +35,17 @@ const MAX_ACCEL = 6;             // per frame contribution (tempo-scaled below)
 // Audio spam guard (optional but helps when magneto pins on walls)
 const AUDIO_COOLDOWN_MS = 50;
 
+type JellyState = {
+  sx: number; sy: number; rot: number;
+  vsx: number; vsy: number; vrot: number;
+  vOff: number[];
+  vVel: number[];
+  nx2: number; ny2: number;
+};
+
 type BubbleExt = Bubble & {
   lastAudioAt?: number;
+  jelly?: JellyState;
 };
 
 export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
@@ -81,6 +90,68 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       if (logRef.current.length > 16) logRef.current.shift();
     };
 
+    const applyJellyImpact = (b: BubbleExt, nx: number, ny: number, impulse: number) => {
+      if (!b.jelly) return;
+      let nl = Math.sqrt(nx * nx + ny * ny);
+      if (nl < EPS) nl = 1;
+      nx /= nl; ny /= nl;
+
+      const k = Math.min(1, Math.max(0, impulse / 18)) * (50 / Math.max(18, b.radius));
+      const squash = 1 - 0.28 * k;
+      const stretch = 1 + 0.18 * k;
+      const targetRot = Math.atan2(ny, nx);
+
+      b.jelly.nx2 = nx; b.jelly.ny2 = ny;
+      b.jelly.vsx += (squash - b.jelly.sx) * 0.9;
+      b.jelly.vsy += (stretch - b.jelly.sy) * 0.9;
+      b.jelly.vrot += (targetRot - b.jelly.rot) * 0.25;
+
+      const step = (Math.PI * 2) / VERTEX_COUNT;
+      for (let i = 0; i < VERTEX_COUNT; i++) {
+        const a = i * step;
+        const vx = Math.cos(a);
+        const vy = Math.sin(a);
+        const d = vx * nx + vy * ny;
+        const push = (-0.22 * k) * Math.max(0, d) + (0.10 * k) * Math.max(0, -d);
+        b.jelly.vVel[i] += push * 3.2;
+      }
+    };
+
+    const updateJelly = (b: BubbleExt, tempo: number) => {
+      if (!b.jelly) return;
+      const SPR = 0.18 * tempo;
+      const DMP = 0.78;
+      const ROT_SPR = 0.10 * tempo;
+      const ROT_DMP = 0.80;
+
+      const ax = (1 - b.jelly.sx) * SPR;
+      const ay = (1 - b.jelly.sy) * SPR;
+      b.jelly.vsx = (b.jelly.vsx + ax) * DMP;
+      b.jelly.vsy = (b.jelly.vsy + ay) * DMP;
+      b.jelly.sx += b.jelly.vsx;
+      b.jelly.sy += b.jelly.vsy;
+
+      const arot = (0 - b.jelly.rot) * ROT_SPR;
+      b.jelly.vrot = (b.jelly.vrot + arot) * ROT_DMP;
+      b.jelly.rot += b.jelly.vrot;
+
+      b.jelly.sx = Math.max(0.7, Math.min(1.3, b.jelly.sx));
+      b.jelly.sy = Math.max(0.7, Math.min(1.3, b.jelly.sy));
+
+      const VSPR = 0.22 * tempo;
+      const VDMP = 0.70;
+      for (let i = 0; i < VERTEX_COUNT; i++) {
+        const a = (0 - b.jelly.vOff[i]) * VSPR;
+        b.jelly.vVel[i] = (b.jelly.vVel[i] + a) * VDMP;
+        b.jelly.vOff[i] += b.jelly.vVel[i];
+        b.jelly.vOff[i] = Math.max(-0.35, Math.min(0.35, b.jelly.vOff[i]));
+      }
+
+      b.deformation.scaleX = b.jelly.sx;
+      b.deformation.scaleY = b.jelly.sy;
+      b.deformation.rotation = b.jelly.rot;
+    };
+
     const spawnParticle = (x: number, y: number, z: number, color: string) => {
       particlesRef.current.push({
         x, y, z,
@@ -102,6 +173,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ];
       const color = variants[Math.floor(Math.random() * variants.length)];
       const radius = r || Math.random() * 35 + 15;
+      const jelly: JellyState = {
+        sx: 1, sy: 1, rot: 0,
+        vsx: 0, vsy: 0, vrot: 0,
+        vOff: new Array(VERTEX_COUNT).fill(0),
+        vVel: new Array(VERTEX_COUNT).fill(0),
+        nx2: 1, ny2: 0,
+      };
 
       const vertices = new Array(VERTEX_COUNT).fill(1);
       const vertexPhases = new Array(VERTEX_COUNT).fill(0).map(() => Math.random() * Math.PI * 2);
@@ -121,6 +199,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         vertices,
         vertexPhases,
         deformation: { scaleX: 1, scaleY: 1, rotation: 0 },
+        jelly,
         lastAudioAt: 0,
       });
 
@@ -688,22 +767,24 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           // integrate
           b.x += b.vx * tempo; b.y += b.vy * tempo; b.z += b.vz * tempo;
 
-          // Elasticity
+          // Elasticity + jelly offsets
           const elasticity = 0.25 + (0.25 * (1 - freeze));
           for (let j = 0; j < VERTEX_COUNT; j++) {
-            b.vertices[j] = 1 + (
+            const base = 1 + (
               Math.sin(time * 1.5 + b.vertexPhases[j]) * elasticity * 0.6 +
               Math.sin(time * 0.8 + j) * elasticity * 0.4
             );
+            const local = b.jelly ? b.jelly.vOff[j] : 0;
+            b.vertices[j] = base + local;
           }
 
           // Wall Collisions
           let wallHit = false;
-          if (b.x - b.radius < 0) { b.x = b.radius; b.vx *= -0.9; wallHit = true; }
-          else if (b.x + b.radius > canvas.width) { b.x = canvas.width - b.radius; b.vx *= -0.9; wallHit = true; }
+          if (b.x - b.radius < 0) { const imp = Math.abs(b.vx); b.x = b.radius; b.vx *= -0.9; wallHit = true; applyJellyImpact(b, +1, 0, imp); }
+          else if (b.x + b.radius > canvas.width) { const imp = Math.abs(b.vx); b.x = canvas.width - b.radius; b.vx *= -0.9; wallHit = true; applyJellyImpact(b, -1, 0, imp); }
 
-          if (b.y - b.radius < 0) { b.y = b.radius; b.vy *= -0.9; wallHit = true; }
-          else if (b.y + b.radius > canvas.height) { b.y = canvas.height - b.radius; b.vy *= gravity > 0.5 ? -0.6 : -0.9; wallHit = true; }
+          if (b.y - b.radius < 0) { const imp = Math.abs(b.vy); b.y = b.radius; b.vy *= -0.9; wallHit = true; applyJellyImpact(b, 0, +1, imp); }
+          else if (b.y + b.radius > canvas.height) { const imp = Math.abs(b.vy); b.y = canvas.height - b.radius; b.vy *= gravity > 0.5 ? -0.6 : -0.9; wallHit = true; applyJellyImpact(b, 0, -1, imp); }
 
           if (b.z < 0) { b.z = 0; b.vz *= -0.9; wallHit = true; }
           else if (b.z > DEPTH) { b.z = DEPTH; b.vz *= -0.9; wallHit = true; }
@@ -724,6 +805,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             );
           }
 
+          updateJelly(b, tempo);
           clampBubble(b, tempo);
         }
 
@@ -827,6 +909,10 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
                   const overlap = minDist - dist;
                   b1.x -= nx * overlap * 0.5; b1.y -= ny * overlap * 0.5; b1.z -= nz * overlap * 0.5;
                   b2.x += nx * overlap * 0.5; b2.y += ny * overlap * 0.5; b2.z += nz * overlap * 0.5;
+
+                  const impulse = Math.min(20, -velAlongNormal) + overlap * 0.25;
+                  applyJellyImpact(b1, -nx, -ny, impulse);
+                  applyJellyImpact(b2, nx, ny, impulse);
 
                   triggerBubbleSound(b1, 'COLLIDE');
                 }
