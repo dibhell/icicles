@@ -169,6 +169,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                             max="100" 
                             value={(settings[band as keyof AudioSettings] as number * 5) + 50} 
                             onChange={(e) => handleEQChange(band as any, parseFloat(e.target.value))}
+                            onDoubleClick={() => setSettings((p) => ({ ...p, [band]: 0 }))}
                             className="absolute inset-0 opacity-0 cursor-pointer"
                             style={verticalRangeStyle} 
                         />
@@ -182,80 +183,8 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         <div className="block md:hidden w-16 h-px bg-[#B9BCB7]/50"></div>
 
         {/* SECTION 4: Dynamics */}
-        <div className="flex flex-wrap gap-4 px-4 py-4 bg-[#F2F2F0] rounded-xl border border-[#B9BCB7]/30 shadow-inner w-full md:w-auto justify-center">
-          <BufferedKnob
-            value={(settings.compThreshold ?? -12) as number}
-            onCommit={(v) => setSettings((p) => ({ ...p, compThreshold: v }))}
-            min={-40}
-            max={0}
-            label="Comp Thr"
-            format={(v) => `${v.toFixed(1)}dB`}
-            sensitivity={0.002}
-            fineSensitivity={0.0008}
-            color="#5F665F"
-            size={46}
-          />
-          <BufferedKnob
-            value={(settings.compRatio ?? 3) as number}
-            onCommit={(v) => setSettings((p) => ({ ...p, compRatio: v }))}
-            min={1}
-            max={12}
-            label="Comp Ratio"
-            format={(v) => v.toFixed(1)}
-            sensitivity={0.002}
-            fineSensitivity={0.0008}
-            color="#5F665F"
-            size={46}
-          />
-          <BufferedKnob
-            value={(settings.compAttack ?? 0.0001) as number}
-            onCommit={(v) => setSettings((p) => ({ ...p, compAttack: v }))}
-            min={0.00005}
-            max={0.02}
-            label="Attack"
-            format={(v) => `${(v * 1000).toFixed(2)}ms`}
-            sensitivity={0.00005}
-            fineSensitivity={0.00002}
-            color="#5F665F"
-            size={46}
-          />
-          <BufferedKnob
-            value={(settings.compRelease ?? 0.5) as number}
-            onCommit={(v) => setSettings((p) => ({ ...p, compRelease: v }))}
-            min={0.05}
-            max={1.5}
-            label="Release"
-            format={(v) => `${(v * 1000).toFixed(0)}ms`}
-            sensitivity={0.0005}
-            fineSensitivity={0.0002}
-            color="#5F665F"
-            size={46}
-          />
-          <BufferedKnob
-            value={(settings.makeupGainDb ?? 0) as number}
-            onCommit={(v) => setSettings((p) => ({ ...p, makeupGainDb: v }))}
-            min={-12}
-            max={12}
-            label="Makeup"
-            format={(v) => `${v.toFixed(1)}dB`}
-            sensitivity={0.002}
-            fineSensitivity={0.0008}
-            color="#5F665F"
-            size={46}
-          />
-          <BufferedKnob
-            value={(settings.limiterThreshold ?? -1) as number}
-            onCommit={(v) => setSettings((p) => ({ ...p, limiterThreshold: v }))}
-            min={-12}
-            max={0}
-            label="Limiter"
-            format={(v) => `${v.toFixed(1)}dB`}
-            sensitivity={0.002}
-            fineSensitivity={0.0008}
-            color="#5F665F"
-            size={46}
-          />
-        </div>
+        {/* Dynamics panel hidden after hardcoded values */}
+        <div className="hidden" aria-hidden="true"></div>
 
         {/* SECTION 5: LOAD & FREQ */}
         <div className="flex flex-row md:flex-col items-center justify-center gap-6 md:gap-4 px-4 w-full md:w-auto">

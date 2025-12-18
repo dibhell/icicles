@@ -116,9 +116,9 @@ const App: React.FC = () => {
     pingPongWet: 0.0,
     compThreshold: -12,
     compRatio: 3,
-    compAttack: 0.0001,
-    compRelease: 0.5,
-    makeupGainDb: 0,
+    compAttack: 0.005,   // 5ms
+    compRelease: 0.5,    // 500ms
+    makeupGainDb: 8,
     limiterThreshold: -1,
   });
 
