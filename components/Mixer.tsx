@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { AudioSettings } from '../types';
-import { Play, Pause, Square, Upload, Sliders, Circle, MicV2, XCircle } from 'lucide-react';
+import { Play, Pause, Square, Upload, Sliders, Circle, Mic2, XCircle } from 'lucide-react';
 import { audioService } from '../services/audioEngine';
 import { BufferedKnob } from './BufferedKnob';
 
@@ -173,7 +173,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
               className={`w-16 h-16 rounded-full border ${isRecording ? 'border-[#7A8476] bg-[#7A8476] text-[#F2F2F0]' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-[#B9BCB7]'} flex items-center justify-center transition-all`}
               title={isRecording ? 'Stop recording' : 'Record sample (max 10s)'}
             >
-              <MicV2 size={20} className="fill-current" />
+              <Mic2 size={20} className="fill-current" />
             </button>
 
             <div className="flex flex-col items-center gap-2">
