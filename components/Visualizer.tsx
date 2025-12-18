@@ -254,7 +254,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.restore();
     };
 
-    const drawAmoeba = (ctx: CanvasRenderingContext2D, b: BubbleExt, w: number, h: number, blurAmount: number) => {
+    const drawAmoeba = (ctx: CanvasRenderingContext2D, b: BubbleExt, w: number, h: number, blurAmount: number, overlap: boolean) => {
       const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
       const cx = w / 2; const cy = h / 2;
       const x2d = (b.x - cx) * scale + cx;
@@ -264,7 +264,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       if (r2d < 1) return;
 
       ctx.save();
-      const blurPx = Math.min(4, Math.max(0, blurAmount));
+      const blurPx = Math.min(3, Math.max(0, blurAmount));
       if (blurPx > 0.1) ctx.filter = `blur(${blurPx}px)`;
       ctx.translate(x2d, y2d);
       ctx.rotate(b.deformation.rotation);
@@ -293,9 +293,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.fillStyle = b.color;
       ctx.globalAlpha = Math.max(0.1, 1 - (b.z / DEPTH));
       ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.filter = 'none';
+      const depthT = Math.max(0, Math.min(1, b.z / DEPTH));
+      ctx.lineWidth = Math.max(0.6, 1.4 - depthT * 0.8);
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.globalAlpha = Math.max(0.25, 0.9 - depthT * 0.5);
+      const prevComp = ctx.globalCompositeOperation;
+      if (overlap) ctx.globalCompositeOperation = 'difference';
       ctx.stroke();
+      ctx.globalCompositeOperation = prevComp;
 
       if (b.radius > 40) {
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -323,7 +329,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       };
 
       const warpAmt = warp * 0.35;
-      const waveAmt = wave * 0.25;
+      const waveScale = wave * 0.35; // 65% softer
+      const waveAmt = waveScale * 0.25;
       const wavePhase = time * 0.6;
 
       const warpOffset = (ix: number, iy: number, iz: number) => {
@@ -457,15 +464,16 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
     };
 
     const applySchooling = (bubbles: BubbleExt[], wave: number, tempo: number, time: number) => {
-      if (wave < 0.01 || bubbles.length < 2) return;
-      const neighborR = 180 + wave * 320;
+      const w = wave * 0.35; // 65% reduction
+      if (w < 0.01 || bubbles.length < 2) return;
+      const neighborR = 180 + w * 320;
       const neighborSq = neighborR * neighborR;
-      const sepR = 80 + wave * 120;
+      const sepR = 80 + w * 120;
       const sepSq = sepR * sepR;
-      const alignW = 0.04 * wave * Math.max(0.4, tempo);
-      const cohW = 0.02 * wave * Math.max(0.4, tempo);
-      const sepW = 0.08 * wave * Math.max(0.4, tempo);
-      const sway = 6 * wave;
+      const alignW = 0.04 * w * Math.max(0.4, tempo);
+      const cohW = 0.02 * w * Math.max(0.4, tempo);
+      const sepW = 0.08 * w * Math.max(0.4, tempo);
+      const sway = 6 * w;
 
       for (let i = 0; i < bubbles.length; i++) {
         const b = bubbles[i];
@@ -775,9 +783,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           }
         }
 
+        const overlapIds = new Set<string>();
+        collisionPairs.forEach(({ b1, b2 }) => {
+          overlapIds.add(b1.id);
+          overlapIds.add(b2.id);
+        });
+
         // Draw
         bubbles.sort((a, b) => b.z - a.z);
-        bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, (b.z / DEPTH) * 6));
+        bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, (b.z / DEPTH) * 6, overlapIds.has(b.id)));
 
         const topPairs = collisionPairs.sort((a, b) => a.dist - b.dist).slice(0, 3);
         drawHUD(ctx, topPairs, canvas.width, canvas.height);
