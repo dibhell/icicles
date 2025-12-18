@@ -189,7 +189,7 @@ export function Knob({
             fill="none"
             stroke={color}
             strokeWidth={strokeWidth}
-            strokeLinecap="butt"
+            strokeLinecap="round"
             ref={(node) => {
               if (!node) return;
               const L = node.getTotalLength();
