@@ -70,7 +70,7 @@ export function Knob({
   };
   const angleDeg = angleDegFromValue(norm);
 
-  const strokeWidth = size * 0.1;
+  const strokeWidth = size * 0.11; // slightly thicker for better readability
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2 - strokeWidth;
@@ -203,13 +203,13 @@ export function Knob({
             const angle = toRad(angleDeg);
             const px = cx + r * Math.cos(angle);
             const py = cy + r * Math.sin(angle);
-            const innerR = r - strokeWidth * 0.9;
-            const outerR = r + strokeWidth * 0.2;
+            const innerR = r - strokeWidth * 1.1; // extend inward
+            const outerR = r + strokeWidth * 0.4; // extend outward
             const lx1 = cx + innerR * Math.cos(angle);
             const ly1 = cy + innerR * Math.sin(angle);
             const lx2 = cx + outerR * Math.cos(angle);
             const ly2 = cy + outerR * Math.sin(angle);
-            const w = Math.max(1.2, strokeWidth * 0.22);
+            const w = Math.max(1.6, strokeWidth * 0.26); // thicker pointer
             const pointerColor = color ?? '#7A8476';
             return (
               <>
