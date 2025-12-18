@@ -161,11 +161,28 @@ export const Knob: React.FC<KnobProps> = ({
     
     // SVG Math
     const strokeWidth = size * 0.1;
-    const r = size / 2 - (strokeWidth); 
-    const c = 2 * Math.PI * r;
-    const arc = c * 0.75; // 270deg
-    const baseTransform = `rotate(-135 ${size / 2} ${size / 2})`;
-    const offset = arc * (1 - normalized);
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size / 2 - strokeWidth;
+    const startDeg = -135;
+    const sweepDeg = 270;
+    const endDeg = startDeg + sweepDeg;
+
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const polar = (deg: number) => {
+        const rad = toRad(deg);
+        return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+    };
+
+    const trackStart = polar(startDeg);
+    const trackEnd = polar(endDeg);
+    const trackLargeArc = sweepDeg > 180 ? 1 : 0;
+    const trackPath = `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${trackLargeArc} 1 ${trackEnd.x} ${trackEnd.y}`;
+
+    const valueDeg = startDeg + sweepDeg * normalized;
+    const valueEnd = polar(valueDeg);
+    const valueLargeArc = valueDeg - startDeg > 180 ? 1 : 0;
+    const valuePath = `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${valueLargeArc} 1 ${valueEnd.x} ${valueEnd.y}`;
 
     return (
         <div className="flex flex-col items-center gap-1 select-none touch-none">
@@ -180,28 +197,22 @@ export const Knob: React.FC<KnobProps> = ({
                 {/* SVG Ring */}
                 <svg width={size} height={size} className="pointer-events-none drop-shadow-sm">
                     {/* Track */}
-                    <circle
-                        cx={size/2} cy={size/2} r={r}
+                    <path
+                        d={trackPath}
                         fill="none"
                         stroke="#D9DBD6"
                         strokeWidth={strokeWidth}
-                        strokeDasharray={`${arc} ${c}`}
-                        strokeDashoffset={0}
                         strokeLinecap="round"
-                        transform={baseTransform}
                     />
                     {/* Active */}
-                    <circle
-                        cx={size/2} cy={size/2} r={r}
+                    <path
+                        d={valuePath}
                         fill="none"
                         stroke={color}
                         strokeWidth={strokeWidth}
-                        strokeDasharray={`${arc} ${c}`}
-                        strokeDashoffset={offset}
                         strokeLinecap="round"
-                        className={`transition-[stroke-dashoffset] ${isDragging ? 'duration-0' : 'duration-200 ease-out'}`}
+                        className={`transition-all ${isDragging ? 'duration-0' : 'duration-150 ease-out'}`}
                         style={{ opacity: 0.9 }}
-                        transform={baseTransform}
                     />
                 </svg>
 
@@ -211,7 +222,7 @@ export const Knob: React.FC<KnobProps> = ({
                     style={{ transform: `rotate(${rotation}deg)` }}
                 >
                     <div 
-                        className={`absolute -top-[5%] w-1 rounded-full transition-all duration-200
+                        className={`absolute -top-[5%] w-1 rounded-full transition-all duration-150
                         ${isDragging ? 'bg-[#2E2F2B] h-3' : 'bg-[#7A8476] h-2.5'}`} 
                     />
                 </div>

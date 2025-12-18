@@ -25,7 +25,7 @@ import {
   Scissors,
   Snowflake,
   Orbit,
-  Sparkles,
+  Fish,
 } from 'lucide-react';
 
 const VERSION = 'v1.2.2';
@@ -353,7 +353,7 @@ const App: React.FC = () => {
             <KnobWithIcon value={physicsKnobs.reverse} onChange={(v) => setKnob('reverse', v)} icon={RotateCcw} label="Reverse" defaultValue={0.0} />
             <KnobWithIcon value={physicsKnobs.weakness} onChange={(v) => setKnob('weakness', v)} icon={Droplets} label="Weakness" defaultValue={0.0} />
             <KnobWithIcon value={physicsKnobs.geometryWarp} onChange={(v) => setKnob('geometryWarp', v)} icon={Orbit} label="Geometry" defaultValue={0.0} />
-            <KnobWithIcon value={physicsKnobs.roomWave} onChange={(v) => setKnob('roomWave', v)} icon={Sparkles} label="Wave" defaultValue={0.0} />
+            <KnobWithIcon value={physicsKnobs.roomWave} onChange={(v) => setKnob('roomWave', v)} icon={Fish} label="Wave" defaultValue={0.0} />
           </div>
 
           <div className="relative flex flex-wrap justify-center gap-4 px-4 py-8 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
