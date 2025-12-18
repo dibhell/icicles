@@ -223,6 +223,11 @@ class AudioEngine {
     this.stopBackgroundDrone();
     // Keep the context alive for mic metering if a mic stream is attached.
     if (this.micStream) return;
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      console.error('Mic access API unavailable in this browser.');
+      return;
+    }
     try { await this.ctx.suspend(); } catch { /* ignore */ }
   }
 
@@ -552,8 +557,15 @@ class AudioEngine {
     src.connect(this.micGain);
   }
 
-  public async ensureMic() {
+  public async ensureMic(opts?: { fromUserGesture?: boolean }) {
+    await this.init();
     if (!this.ctx) return;
+
+    const fromUserGesture = opts?.fromUserGesture ?? false;
+    if (fromUserGesture) {
+      this.lastUserGestureAt = performance.now();
+      await this.resume();
+    }
 
     if (this.micStream) {
       const hasLiveTrack = this.micStream.getTracks().some((t) => t.readyState === 'live');
@@ -564,12 +576,7 @@ class AudioEngine {
       }
     }
 
-    if (this.micStream) {
-      if (this.ctx.state !== 'running') {
-        try { await this.ctx.resume(); } catch { /* ignore */ }
-      }
-      return;
-    }
+    if (this.micStream) return;
 
     if (this.micEnsureInFlight) {
       await this.micEnsureInFlight;
@@ -578,7 +585,16 @@ class AudioEngine {
 
     try {
       this.micEnsureInFlight = (async () => {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const constraints: MediaStreamConstraints = {
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            channelCount: 1,
+            sampleRate: 48000,
+          },
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getAudioTracks().forEach((t) => { t.enabled = true; });
         this.attachMicStream(stream);
         if (this.ctx && this.ctx.state !== 'running') {
           try { await this.ctx.resume(); } catch { /* ignore */ }

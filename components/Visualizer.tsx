@@ -859,19 +859,21 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             if (b.radius < 5) { bubbles.splice(i, 1); i--; continue; }
           }
 
-          if (blackHole > 0.05) {
+          const blackHoleEff = Math.max(0, blackHole - 0.08);
+          if (blackHoleEff > 0.001) {
             // VOID: central gravity + frame-drag swirl + accretion (tangential drag)
             // Use XY distance for the "on-screen" spiral; Z is treated as a funnel into depth.
             const dx = cx - b.x;
             const dy = cy - b.y;
             const rSq = dx * dx + dy * dy;
             const r = Math.sqrt(Math.max(EPS, rSq));
-
-            // event horizon in *screen space* (projection), so it matches what the player sees
             const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
             const r2d = r * scale;
-            const horizon = 18 + blackHole * 55;
-            const horizonWithSize = horizon + (b.radius * scale) * 0.25;
+
+            // event horizon in *screen space* (projection), so it matches what the player sees
+            const bhCurve = blackHoleEff * blackHoleEff;
+            const horizon = 12 + bhCurve * 80;
+            const horizonWithSize = horizon + (b.radius * scale) * 0.2;
             if (r2d < horizonWithSize) { bubbles.splice(i, 1); i--; continue; }
 
             const ux = dx / r;
@@ -880,26 +882,26 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             const ty = ux;
 
             // Newtonian-like gravity with softening + accel clamp for stability
-            const gm = 36000 * blackHole;
-            const soft = 2600; // px^2
+            const gm = 24000 * bhCurve + 4000 * blackHoleEff;
+            const soft = 3200; // px^2
             let a = gm / (rSq + soft);
             const maxA = MAX_ACCEL * Math.max(0.2, tempo);
             if (a > maxA) a = maxA;
 
             // "Spin": swirl is proportional to gravity (stronger near the hole, weaker far away)
-            const aTan = a * (0.1 + 0.3 * blackHole);
+            const aTan = a * (0.08 + 0.25 * blackHoleEff);
 
             b.vx += ux * a + tx * aTan;
             b.vy += uy * a + ty * aTan;
 
             // Depth funnel: pull towards mid-depth so bubbles don't "bounce" off the back wall.
-            const funnel = (1 / (1 + (r / 240))) * blackHole;
+            const funnel = (1 / (1 + (r / 240))) * bhCurve;
             const dz = (DEPTH * 0.5) - b.z;
-            b.vz += (dz / DEPTH) * a * (0.25 + 0.55 * blackHole);
+            b.vz += (dz / DEPTH) * a * (0.25 + 0.45 * blackHoleEff);
 
             // Accretion drag: remove angular momentum so orbits become spirals
             const vTan = b.vx * tx + b.vy * ty;
-            const dragT = Math.min(0.09, (0.02 + 0.08 * blackHole) * funnel * Math.max(0.2, tempo));
+            const dragT = Math.min(0.08, (0.01 + 0.07 * blackHoleEff) * funnel * Math.max(0.2, tempo));
             b.vx -= tx * vTan * dragT;
             b.vy -= ty * vTan * dragT;
 
@@ -961,7 +963,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           updateJelly(b, tempo);
 
           // Spaghettification (tidal stretching) near the event horizon: stretch radial, squeeze tangential.
-          if (blackHole > 0.05) {
+          if (blackHoleEff > 0.001) {
             const dx = cx - b.x;
             const dy = cy - b.y;
             const rSq = dx * dx + dy * dy;
@@ -969,7 +971,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
             const r2d = r * scale;
 
-            const tidal = blackHole / (1 + Math.pow(r2d / 140, 3));
+            const tidal = (blackHoleEff * blackHoleEff) / (1 + Math.pow(r2d / 140, 3));
             if (tidal > 0.002) {
               const targetRot = Math.atan2(dy, dx);
               const blend = Math.min(1, tidal * 1.25);

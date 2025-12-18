@@ -164,6 +164,16 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
     setSourceMode(mode);
     audioService.setSoundType(mode === 'synth' ? SoundType.SYNTH : SoundType.SAMPLE);
+    if (mode === 'mic') {
+      void (async () => {
+        try {
+          await audioService.primeFromGesture();
+          await audioService.ensureMic({ fromUserGesture: true });
+        } catch (err) {
+          console.error('Mic start failed', err);
+        }
+      })();
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -180,6 +190,15 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
     }
   };
 
+  const pickMimeType = () => {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/mpeg'];
+    if (typeof MediaRecorder === 'undefined') return '';
+    for (const c of candidates) {
+      if (MediaRecorder.isTypeSupported(c)) return c;
+    }
+    return '';
+  };
+
   const handleRecordToggle = async () => {
     if (isRecording && recorderRef.current) {
       recorderRef.current.stop();
@@ -193,11 +212,15 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
     try {
       await audioService.primeFromGesture();
-      await audioService.ensureMic();
+      await audioService.ensureMic({ fromUserGesture: true });
       const stream = audioService.getMicStream();
-      if (!stream) return;
+      if (!stream || typeof MediaRecorder === 'undefined') {
+        console.error('Recording not supported in this browser/environment.');
+        return;
+      }
       streamRef.current = stream;
-      const rec = new MediaRecorder(stream);
+      const mimeType = pickMimeType();
+      const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recorderRef.current = rec;
       recorderChunks.current = [];
 
@@ -205,7 +228,8 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         if (ev.data && ev.data.size > 0) recorderChunks.current.push(ev.data);
       };
       rec.onstop = async () => {
-        const blob = new Blob(recorderChunks.current, { type: 'audio/webm' });
+        const blobType = rec.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(recorderChunks.current, { type: blobType });
         recorderChunks.current = [];
         if (recorderTimerRef.current) {
           clearTimeout(recorderTimerRef.current);
@@ -353,7 +377,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                 max={4}
                 defaultValue={1}
                 onChange={(v) => {
-                  if (!audioService.getMicStream()) void audioService.ensureMic();
+                  if (!audioService.getMicStream()) void audioService.ensureMic({ fromUserGesture: true });
                   setMicGain(v);
                   audioService.setMicGain(v);
                 }}
@@ -446,13 +470,13 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
               className={`w-full px-2 py-1 rounded-md text-[10px] uppercase border ${sourceMode === 'synth' ? 'bg-[#7A8476] text-white border-[#7A8476]' : 'border-[#B9BCB7] text-[#5F665F]'}`}
               onClick={() => selectSource('synth')}
             >
-              Synth
+              SNT
             </button>
             <button
               className={`w-full px-2 py-1 rounded-md text-[10px] uppercase border ${sourceMode === 'sample' ? 'bg-[#7A8476] text-white border-[#7A8476]' : 'border-[#B9BCB7] text-[#5F665F]'} ${!sampleAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => selectSource('sample')}
             >
-              Sample
+              SMP
             </button>
           </div>
 
