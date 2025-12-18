@@ -59,7 +59,8 @@ export function Knob({
 
   const norm = useMemo(() => clamp((value - min) / (max - min || 1), 0, 1), [value, min, max]);
 
-  const startDeg = 225; // 0.0 = bottom-left-ish
+  const START_OFFSET_DEG = -12; // tweak to align pointer/progress perfectly
+  const startDeg = 225 + START_OFFSET_DEG; // 0.0 = bottom-left-ish
   const sweepDeg = 270;
   const cw = true;
 
@@ -181,28 +182,42 @@ export function Knob({
             strokeWidth={strokeWidth}
             strokeLinecap="round"
           />
-          {/* Progress uses dashoffset from startDeg */}
+          {/* Progress uses the same path; dashoffset reveals from the start */}
           <path
             d={trackPath}
             fill="none"
             stroke={color}
             strokeWidth={strokeWidth}
-            strokeLinecap="round"
+            strokeLinecap="butt"
             ref={(node) => {
               if (!node) return;
               const L = node.getTotalLength();
+              const filled = norm * L;
               node.style.strokeDasharray = `${L} ${L}`;
-              node.style.strokeDashoffset = `${L * (1 - norm)}`;
+              node.style.strokeDashoffset = `${L - filled}`;
               node.style.opacity = '0.9';
             }}
           />
+          {/* Pointer drawn in the same coordinate system */}
+          {(() => {
+            const angle = toRad(angleDeg);
+            const px = cx + r * Math.cos(angle);
+            const py = cy + r * Math.sin(angle);
+            const innerR = r - strokeWidth * 0.9;
+            const outerR = r + strokeWidth * 0.2;
+            const lx1 = cx + innerR * Math.cos(angle);
+            const ly1 = cy + innerR * Math.sin(angle);
+            const lx2 = cx + outerR * Math.cos(angle);
+            const ly2 = cy + outerR * Math.sin(angle);
+            const w = Math.max(1.2, strokeWidth * 0.22);
+            return (
+              <>
+                <line x1={lx1} y1={ly1} x2={lx2} y2={ly2} stroke="#FFFFFF" strokeWidth={w} strokeLinecap="round" />
+                <circle cx={px} cy={py} r={w * 0.75} fill="#FFFFFF" />
+              </>
+            );
+          })()}
         </svg>
-        <div
-          className="absolute top-0 left-0 w-full h-full flex items-center justify-center pointer-events-none"
-          style={{ transform: `rotate(${angleDeg}deg)` }}
-        >
-          <div className="w-1 h-3 bg-white rounded-full absolute -top-1 shadow-sm" />
-        </div>
       </div>
       <div className="flex flex-col items-center pointer-events-none mt-1">
         {label && <span className="text-[9px] font-bold text-[#7A8476] uppercase tracking-wider leading-none mb-0.5 opacity-80">{label}</span>}
