@@ -593,6 +593,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
         const bubbles = bubblesRef.current;
         const particles = particlesRef.current;
+        const recovering = perfRef.current.recovering;
+        const fpsNow = fpsRef.current.fps;
+        const severity = recovering ? Math.max(0, 30 - Math.max(0, fpsNow)) / 30 : 0;
+        let shredQuota = 0;
+        if (recovering && bubbles.length > 0) {
+          // Gradual decay: remove a small fraction per frame based on severity, capped
+          shredQuota = Math.max(1, Math.floor(bubbles.length * (0.02 + severity * 0.06)));
+          shredQuota = Math.min(shredQuota, Math.max(2, Math.floor(bubbles.length * 0.1)));
+        }
 
         if (!isPlayingRef.current) {
           bubbles.sort((a, b) => b.z - a.z);
@@ -636,11 +645,11 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             b.vz *= drag;
           }
 
-          // Auto shred if perf drops
-          const shredding = perfRef.current.recovering;
-          if (shredding && i < bubbles.length && Math.random() < 0.6) {
+          // Auto shred if perf drops (gradual, not all at once)
+          if (recovering && shredQuota > 0 && Math.random() < (0.35 + severity * 0.35)) {
             for (let k = 0; k < 32; k++) spawnParticle(b.x, b.y, b.z, b.color);
             pushLog(`FPS_SHRED: ${b.id}`);
+            shredQuota -= 1;
             bubbles.splice(i, 1); i--; continue;
           }
 
