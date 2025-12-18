@@ -113,6 +113,12 @@ const App: React.FC = () => {
     reverbWet: 0.3,
     baseFrequency: 440,
     pingPongWet: 0.0,
+    compThreshold: -12,
+    compRatio: 3,
+    compAttack: 0.0001,
+    compRelease: 0.5,
+    makeupGainDb: 0,
+    limiterThreshold: -1,
   });
 
   // Physics knobs (0..1)
