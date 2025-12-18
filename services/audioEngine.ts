@@ -631,10 +631,12 @@ class AudioEngine {
     sampleGain: number = 1
   ) {
     if (!this.ctx) return;
-    if (this.ctx.state !== 'running') {
+    let ctxState = this.ctx.state;
+    if (ctxState !== 'running') {
       if (!this.shouldPlay) return;
       void this.resume();
-      if (this.ctx.state !== 'running') return;
+      ctxState = this.ctx.state;
+      if (ctxState !== 'running') return;
     }
 
     if (this.activeVoices >= this.MAX_VOICES) {

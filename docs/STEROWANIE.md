@@ -30,7 +30,7 @@
 ## Grupa Destructive
 - Budding - podzial na mniejsze kulki.
 - Merge - zlewanie obiektow przy kolizji.
-- Void - wciaganie do centrum (czarna dziura).
+- Void - wciaganie do centrum (czarna dziura): spirala (akrecja), rozciaganie plywowe i pochlanianie przy horyzoncie zdarzen.
 - Shred - fragmentacja na czasteczki.
 
 ## Mixer

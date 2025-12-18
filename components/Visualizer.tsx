@@ -800,13 +800,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
         if (!isPlayingRef.current) {
           bubbles.sort((a, b) => b.z - a.z);
-          bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, 0));
+          bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, 0, false));
           requestRef.current = requestAnimationFrame(animate);
           return;
         }
 
         const { tempo, gravity, buddingChance, cannibalism, wind, blackHole, weakness, magneto, fragmentation, freeze, roomWave } = phys;
-        const cx = canvas.width / 2; const cy = canvas.height / 2; const cz = DEPTH / 2;
+        const cx = canvas.width / 2; const cy = canvas.height / 2;
 
         // --- PARTICLE LOOP ---
         for (let i = 0; i < particles.length; i++) {
@@ -860,15 +860,52 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           }
 
           if (blackHole > 0.05) {
-            const dx = cx - b.x; const dy = cy - b.y; const dz = cz - b.z;
-            const distSq = dx * dx + dy * dy + dz * dz;
-            const dist = Math.sqrt(Math.max(EPS, distSq));
-            if (dist < 40 + (blackHole * 20)) { bubbles.splice(i, 1); i--; continue; }
-            const force = (blackHole * 5000) / Math.max(1000, distSq);
-            const angle = Math.atan2(dy, dx);
-            b.vx += (dx / dist) * force + (-Math.sin(angle) * blackHole * 0.5);
-            b.vy += (dy / dist) * force + (Math.cos(angle) * blackHole * 0.5);
-            b.vz += (dz / dist) * force;
+            // VOID: central gravity + frame-drag swirl + accretion (tangential drag)
+            // Use XY distance for the "on-screen" spiral; Z is treated as a funnel into depth.
+            const dx = cx - b.x;
+            const dy = cy - b.y;
+            const rSq = dx * dx + dy * dy;
+            const r = Math.sqrt(Math.max(EPS, rSq));
+
+            // event horizon in *screen space* (projection), so it matches what the player sees
+            const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
+            const r2d = r * scale;
+            const horizon = 18 + blackHole * 55;
+            const horizonWithSize = horizon + (b.radius * scale) * 0.25;
+            if (r2d < horizonWithSize) { bubbles.splice(i, 1); i--; continue; }
+
+            const ux = dx / r;
+            const uy = dy / r;
+            const tx = -uy;
+            const ty = ux;
+
+            // Newtonian-like gravity with softening + accel clamp for stability
+            const gm = 36000 * blackHole;
+            const soft = 2600; // px^2
+            let a = gm / (rSq + soft);
+            const maxA = MAX_ACCEL * Math.max(0.2, tempo);
+            if (a > maxA) a = maxA;
+
+            // "Spin": swirl is proportional to gravity (stronger near the hole, weaker far away)
+            const aTan = a * (0.1 + 0.3 * blackHole);
+
+            b.vx += ux * a + tx * aTan;
+            b.vy += uy * a + ty * aTan;
+
+            // Depth funnel: pull towards mid-depth so bubbles don't "bounce" off the back wall.
+            const funnel = (1 / (1 + (r / 240))) * blackHole;
+            const dz = (DEPTH * 0.5) - b.z;
+            b.vz += (dz / DEPTH) * a * (0.25 + 0.55 * blackHole);
+
+            // Accretion drag: remove angular momentum so orbits become spirals
+            const vTan = b.vx * tx + b.vy * ty;
+            const dragT = Math.min(0.09, (0.02 + 0.08 * blackHole) * funnel * Math.max(0.2, tempo));
+            b.vx -= tx * vTan * dragT;
+            b.vy -= ty * vTan * dragT;
+
+            // Small damping to counter the injected swirl energy (keeps capture stable)
+            const damp = 1 - Math.min(0.06, dragT * 0.25);
+            b.vx *= damp; b.vy *= damp; b.vz *= damp;
           } else {
             b.vy += gravity * 0.15;
           }
@@ -922,6 +959,28 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           }
 
           updateJelly(b, tempo);
+
+          // Spaghettification (tidal stretching) near the event horizon: stretch radial, squeeze tangential.
+          if (blackHole > 0.05) {
+            const dx = cx - b.x;
+            const dy = cy - b.y;
+            const rSq = dx * dx + dy * dy;
+            const r = Math.sqrt(Math.max(EPS, rSq));
+            const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
+            const r2d = r * scale;
+
+            const tidal = blackHole / (1 + Math.pow(r2d / 140, 3));
+            if (tidal > 0.002) {
+              const targetRot = Math.atan2(dy, dx);
+              const blend = Math.min(1, tidal * 1.25);
+              const curRot = b.deformation.rotation;
+              const delta = Math.atan2(Math.sin(targetRot - curRot), Math.cos(targetRot - curRot));
+
+              b.deformation.rotation = curRot + delta * blend;
+              b.deformation.scaleX = Math.max(0.35, Math.min(3.0, b.deformation.scaleX * (1 + tidal * 1.6)));
+              b.deformation.scaleY = Math.max(0.35, Math.min(3.0, b.deformation.scaleY * (1 - tidal * 0.7)));
+            }
+          }
           clampBubble(b, tempo);
         }
 
