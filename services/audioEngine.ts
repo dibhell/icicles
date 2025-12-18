@@ -77,9 +77,6 @@ class AudioEngine {
     this.micMeter = this.ctx.createAnalyser();
     this.micMeter.fftSize = 1024;
     this.micMeter.smoothingTimeConstant = 0.65;
-    this.micMeter = this.ctx.createAnalyser();
-    this.micMeter.fftSize = 1024;
-    this.micMeter.smoothingTimeConstant = 0.65;
 
     // Compressor (musical)
     this.compressorNode = this.ctx.createDynamicsCompressor();

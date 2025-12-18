@@ -12,6 +12,111 @@ interface MixerProps {
   onStop: () => void;
 }
 
+type FaderProps = {
+  value: number;
+  min: number;
+  max: number;
+  defaultValue: number;
+  height?: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+};
+
+const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
+
+const TRACK_TOP = 8;
+const TRACK_BOTTOM = 8;
+const THUMB_RADIUS = 8;
+const HITBOX_MIN_W = 32;
+const FADER_DEFAULT_H = 200;
+
+const Fader: React.FC<FaderProps> = ({ value, min, max, defaultValue, height = FADER_DEFAULT_H, onChange, disabled }) => {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const stateRef = useRef({
+    pointerId: -1,
+    startY: 0,
+    startVal: 0,
+    moved: false,
+    lastUpAt: 0,
+    lastUpX: 0,
+    lastUpY: 0,
+  });
+
+  const toRatio = (val: number) => (val - min) / (max - min || 1);
+  const fromRatio = (t: number) => min + t * (max - min);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    stateRef.current.pointerId = e.pointerId;
+    stateRef.current.startY = e.clientY;
+    stateRef.current.startVal = value;
+    stateRef.current.moved = false;
+    stateRef.current.lastUpAt = stateRef.current.lastUpAt || 0;
+
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== stateRef.current.pointerId) return;
+      ev.preventDefault();
+      const dy = stateRef.current.startY - ev.clientY; // up = positive
+      const travel = height - TRACK_TOP - TRACK_BOTTOM - (THUMB_RADIUS * 2);
+      const sensitivity = (max - min) / travel;
+      let next = stateRef.current.startVal + dy * sensitivity;
+      next = clamp(next, min, max);
+      if (Math.abs(dy) > 3) stateRef.current.moved = true;
+      onChange(next);
+    };
+
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== stateRef.current.pointerId) return;
+      ev.preventDefault();
+      const now = performance.now();
+      const dx = ev.clientX - stateRef.current.startY; // not used
+      const dist = Math.hypot(ev.clientX - stateRef.current.startY, ev.clientY - stateRef.current.startY);
+      const dt = now - stateRef.current.lastUpAt;
+      const isDouble = dist < 4 && dt < 300 && !stateRef.current.moved;
+      if (isDouble) {
+        onChange(defaultValue);
+        stateRef.current.lastUpAt = 0;
+      } else {
+        stateRef.current.lastUpAt = now;
+        stateRef.current.lastUpX = ev.clientX;
+        stateRef.current.lastUpY = ev.clientY;
+      }
+      stateRef.current.pointerId = -1;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up, { passive: false });
+    window.addEventListener('pointercancel', up, { passive: false });
+  };
+
+  const ratio = toRatio(value);
+  const travel = height - TRACK_TOP - TRACK_BOTTOM - THUMB_RADIUS * 2;
+  const thumbBottom = TRACK_BOTTOM + ratio * travel;
+  return (
+    <div className="relative flex items-center justify-center" style={{ height, width: 40 }}>
+      <div
+        ref={trackRef}
+        className="pointer-events-none absolute"
+        style={{ top: TRACK_TOP, bottom: TRACK_BOTTOM, left: '50%', transform: 'translateX(-50%)', width: 6, backgroundColor: '#B9BCB7', borderRadius: 999 }}
+      />
+      <div
+        className="pointer-events-none absolute bg-[#7A8476] rounded-full shadow-sm"
+        style={{ width: THUMB_RADIUS * 2, height: THUMB_RADIUS * 2, left: '50%', transform: 'translateX(-50%)', bottom: thumbBottom }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{ minWidth: HITBOX_MIN_W, height: '100%', opacity: 0, touchAction: 'none', pointerEvents: disabled ? 'none' : 'auto' }}
+        onPointerDown={handlePointerDown}
+      />
+    </div>
+  );
+};
+
 export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, onPlayPause, onStop }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const peakCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -191,55 +296,33 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
               </div>
             </div>
 
-            <div className="flex items-start gap-4">
+            <div className="flex items-start gap-6">
               <div className="flex flex-col items-center gap-2">
                 <div className="text-[9px] uppercase text-[#7A8476]">Mic Gain</div>
-                <div className="h-40 flex justify-center relative w-10">
-                  <div className="absolute inset-y-0 w-1.5 bg-[#B9BCB7] rounded-full left-1/2 -translate-x-1/2"></div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="4"
-                    step="0.05"
-                    value={micGain}
-                    disabled={sourceMode !== 'mic'}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setMicGain(v);
-                      audioService.setMicGain(v);
-                    }}
-                    onPointerDown={() => audioService.ensureMic()}
-                    className="h-full w-6 opacity-0 cursor-pointer absolute z-10"
-                    style={verticalRangeStyle}
-                  />
-                  <div 
-                    className="absolute w-4 h-4 bg-[#7A8476] rounded-full shadow-sm left-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-75"
-                    style={{ bottom: `calc(${(micGain / 4) * 100}% - 8px)`, opacity: sourceMode === 'mic' ? 1 : 0.3 }}
-                  ></div>
-                </div>
-                <canvas ref={micVURef} width={6} height={96} className="rounded-sm bg-black/5 h-24 w-2" />
+                <Fader
+                  value={micGain}
+                  min={0}
+                  max={4}
+                  defaultValue={1}
+                  onChange={(v) => {
+                    setMicGain(v);
+                    audioService.setMicGain(v);
+                  }}
+                  disabled={sourceMode !== 'mic'}
+                />
+                <canvas ref={micVURef} width={10} height={160} className="rounded-sm bg-black/5 h-40 w-2.5" />
               </div>
 
               <div className="flex flex-col items-center gap-2">
                 <div className="text-[9px] uppercase text-[#7A8476]">Sample Gain</div>
-                <div className="h-40 flex justify-center relative w-10">
-                  <div className="absolute inset-y-0 w-1.5 bg-[#B9BCB7] rounded-full left-1/2 -translate-x-1/2"></div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.05"
-                    value={settings.sampleGain ?? 1}
-                    disabled={sourceMode !== 'sample'}
-                    onChange={(e) => setSettings(p => ({ ...p, sampleGain: parseFloat(e.target.value) }))}
-                    className="h-full w-6 opacity-0 cursor-pointer absolute z-10"
-                    style={verticalRangeStyle}
-                  />
-                  <div 
-                    className="absolute w-4 h-4 bg-[#7A8476] rounded-full shadow-sm left-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-75"
-                    style={{ bottom: `calc(${((settings.sampleGain ?? 1) / 2) * 100}% - 8px)`, opacity: sourceMode === 'sample' ? 1 : 0.3 }}
-                  ></div>
-                </div>
+                <Fader
+                  value={settings.sampleGain ?? 1}
+                  min={0}
+                  max={2}
+                  defaultValue={1}
+                  onChange={(v) => setSettings(p => ({ ...p, sampleGain: v }))}
+                  disabled={sourceMode !== 'sample'}
+                />
                 <div className="text-[10px] text-[#5F665F]">{(settings.sampleGain ?? 1).toFixed(2)}</div>
                 <button 
                   onClick={() => fileInputRef.current?.click()}
@@ -280,31 +363,21 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             <div className="flex items-end gap-4">
               <div className="flex flex-col items-center gap-1">
                 <span className="text-[8px] uppercase opacity-60">Peak</span>
-                <canvas ref={peakCanvasRef} width={10} height={140} className="rounded-sm bg-black/5 h-36 w-2.5" />
+                <canvas ref={peakCanvasRef} width={10} height={160} className="rounded-sm bg-black/5 h-40 w-2.5" />
               </div>
               <div className="flex flex-col items-center gap-1">
                 <span className="text-[8px] uppercase opacity-60">Main</span>
-                <canvas ref={mainCanvasRef} width={10} height={140} className="rounded-sm bg-black/5 h-36 w-2.5" />
+                <canvas ref={mainCanvasRef} width={10} height={160} className="rounded-sm bg-black/5 h-40 w-2.5" />
               </div>
               <div className="flex flex-col items-center gap-1">
                 <span className="text-[8px] uppercase opacity-60">Level</span>
-                <div className="h-40 flex justify-center relative w-10">
-                  <div className="absolute inset-y-0 w-1.5 bg-[#B9BCB7] rounded-full left-1/2 -translate-x-1/2"></div>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="1" 
-                    step="0.01" 
-                    value={settings.volume} 
-                    onChange={(e) => setSettings(p => ({ ...p, volume: parseFloat(e.target.value) }))}
-                    className="h-full w-6 opacity-0 cursor-pointer absolute z-10"
-                    style={verticalRangeStyle}
-                  />
-                  <div 
-                    className="absolute w-4 h-4 bg-[#7A8476] rounded-full shadow-sm left-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-75"
-                    style={{ bottom: `calc(${settings.volume * 100}% - 8px)` }}
-                  ></div>
-                </div>
+                <Fader
+                  value={settings.volume}
+                  min={0}
+                  max={1}
+                  defaultValue={0.7}
+                  onChange={(v) => setSettings(p => ({ ...p, volume: v }))}
+                />
               </div>
             </div>
           </div>
