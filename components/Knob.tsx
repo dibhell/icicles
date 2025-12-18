@@ -96,14 +96,32 @@ export const Knob: React.FC<KnobProps> = ({
     };
   }, []);
 
-  // SVG arc via dash array (simple and aligned with indicator)
+  // SVG arc via explicit path (start at -135°, sweep 270°)
   const strokeWidth = size * 0.1;
-  const r = size * 0.375; // matches 48 -> 18 from reference
-  const dashArray = 2 * Math.PI * r;
-  const arcLen = dashArray * 0.75; // 270 deg worth of arc
-  const gapLen = dashArray - arcLen; // gap for missing 90 deg
-  const baseOffset = gapLen * 0.5; // center the gap at the bottom
-  const dashOffset = baseOffset + arcLen * (1 - normalized); // active arc shrinks from end
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - strokeWidth;
+  const startDeg = -135;
+  const sweepDeg = 270;
+
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const polar = (deg: number) => {
+    const rad = toRad(deg);
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  };
+
+  const trackStart = polar(startDeg);
+  const trackEnd = polar(startDeg + sweepDeg);
+  const trackLargeArc = sweepDeg > 180 ? 1 : 0;
+  const trackPath = `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${trackLargeArc} 1 ${trackEnd.x} ${trackEnd.y}`;
+
+  const valueDeg = startDeg + sweepDeg * normalized;
+  const valueEnd = polar(valueDeg);
+  const valueLargeArc = valueDeg - startDeg > 180 ? 1 : 0;
+  const valuePath =
+    normalized <= 0.0001
+      ? ''
+      : `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${valueLargeArc} 1 ${valueEnd.x} ${valueEnd.y}`;
 
   return (
     <div className="flex flex-col items-center gap-1 select-none touch-none">
@@ -117,31 +135,25 @@ export const Knob: React.FC<KnobProps> = ({
         onDoubleClick={handleDoubleClick}
         title="Drag up/down | Double click reset"
       >
-        <svg width={size} height={size} className="transform rotate-90 drop-shadow-sm pointer-events-none">
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
+        <svg width={size} height={size} className="drop-shadow-sm pointer-events-none">
+          <path
+            d={trackPath}
             fill="none"
             stroke="#D9DBD6"
             strokeWidth={strokeWidth}
-            strokeDasharray={`${arcLen} ${gapLen}`}
-            strokeDashoffset={baseOffset}
             strokeLinecap="round"
           />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            fill="none"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeDasharray={`${arcLen} ${gapLen}`}
-            strokeDashoffset={dashOffset}
-            strokeLinecap="round"
-            className="transition-all duration-75 ease-out"
-            style={{ opacity: 0.9, filter: `drop-shadow(0 0 3px ${color}40)` }}
-          />
+          {valuePath && (
+            <path
+              d={valuePath}
+              fill="none"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              className="transition-all duration-75 ease-out"
+              style={{ opacity: 0.9, filter: `drop-shadow(0 0 3px ${color}40)` }}
+            />
+          )}
         </svg>
         <div
           className="absolute top-0 left-0 w-full h-full flex items-center justify-center pointer-events-none"
