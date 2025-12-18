@@ -275,26 +275,26 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         <Sliders size={12} /> MASTER CONTROL
       </div>
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: '220px 220px 200px 220px 220px' }}>
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.15fr_0.85fr_0.95fr_0.95fr_1.10fr]">
         {/* TRANSPORT */}
-        <div className="bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-4">
+        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-4">
           <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">Transport</div>
           <div className="flex items-center justify-center gap-4 h-[200px]">
             <button
               onClick={onPlayPause}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-sm ${isPlaying ? 'bg-[#7A8476] text-[#F2F2F0]' : 'bg-[#7A8476] text-[#F2F2F0] hover:bg-[#5F665F]'}`}
+              className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all shadow-sm ${isPlaying ? 'bg-[#7A8476] text-[#F2F2F0]' : 'bg-[#7A8476] text-[#F2F2F0] hover:bg-[#5F665F]'}`}
             >
               {isPlaying ? <Pause size={24} className="fill-current" /> : <Play size={24} className="fill-current ml-1" />}
             </button>
             <button
               onClick={onStop}
-              className="w-16 h-16 rounded-full border border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] flex items-center justify-center hover:bg-[#B9BCB7] transition-all"
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full border border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] flex items-center justify-center hover:bg-[#B9BCB7] transition-all"
             >
               <Square size={20} className="fill-current" />
             </button>
             <button
               onClick={handleRecordToggle}
-              className={`w-16 h-16 rounded-full border ${isRecording ? 'border-[#7A8476] bg-[#7A8476] text-[#F2F2F0]' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-[#B9BCB7]'} flex items-center justify-center transition-all`}
+              className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full border ${isRecording ? 'border-[#7A8476] bg-[#7A8476] text-[#F2F2F0]' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-[#B9BCB7]'} flex items-center justify-center transition-all`}
               title={isRecording ? 'Stop recording' : 'Record sample (max 10s)'}
             >
               <Mic2 size={20} className="fill-current" />
@@ -303,7 +303,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         </div>
 
         {/* MIC */}
-        <div className="bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-2">
+        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-2">
           <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">Mic</div>
           <div className="flex items-center justify-center gap-4 h-[200px]">
             <div className="flex flex-col items-center gap-1">
@@ -329,7 +329,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         </div>
 
         {/* OUT */}
-        <div className="bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-3">
+        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-3">
           <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">Out</div>
           <div className="flex items-end justify-center gap-4 h-[200px]">
             <div className="flex flex-col items-center gap-1">
@@ -357,7 +357,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         </div>
 
         {/* EQ */}
-        <div className="bg-[#E4E5E2] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-2 shadow-inner">
+        <div className="min-w-0 bg-[#E4E5E2] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-2 shadow-inner">
           <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">EQ</div>
           <div className="flex items-end justify-center gap-4 h-[200px]">
             {['low', 'mid', 'high'].map((band) => (
@@ -377,12 +377,12 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         </div>
 
         {/* DATA */}
-        <div className="bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-3">
+        <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-4 flex flex-col gap-3">
           <div className="text-[10px] uppercase tracking-widest text-[#7A8476] text-center">Data</div>
           <div className="flex justify-center">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-6 py-3 bg-[#F2F2F0] border border-[#B9BCB7] rounded-lg hover:bg-white transition-all text-[10px] uppercase font-bold shadow-sm"
+              className="w-full max-w-[240px] flex items-center justify-center gap-2 px-4 py-3 bg-[#F2F2F0] border border-[#B9BCB7] rounded-lg hover:bg-white transition-all text-[10px] uppercase font-bold shadow-sm"
             >
               <Upload size={12} />
               Load Sample
@@ -396,7 +396,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             />
           </div>
 
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               className={`px-3 py-1 rounded-full text-[10px] uppercase border ${sourceMode === 'mic' ? 'bg-[#7A8476] text-white border-[#7A8476]' : 'border-[#B9BCB7] text-[#5F665F]'} ${!micAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => selectSource('mic')}
@@ -417,7 +417,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             </button>
           </div>
 
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               onClick={handleClearMic}
               className="flex items-center gap-2 px-3 py-2 bg-[#F2F2F0] border border-[#B9BCB7] rounded-lg hover:bg-white transition-all text-[10px] uppercase font-bold shadow-sm disabled:opacity-40"
