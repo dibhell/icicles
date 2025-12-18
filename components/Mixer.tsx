@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AudioSettings, SoundType } from '../types';
-import { Play, Pause, Square, Upload, Sliders, Mic2, XCircle } from 'lucide-react';
+import { Play, Pause, Square, Upload, Sliders, Mic2, XCircle, Sparkles, Waves } from 'lucide-react';
 import { audioService } from '../services/audioEngine';
 
 interface MixerProps {
@@ -306,33 +306,39 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-[1.10fr_0.70fr_0.90fr_0.90fr_1.40fr]">
         {/* TRANSPORT */}
         <div className="col-span-2 lg:col-span-1 min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
-          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">Transport</div>
-          <div className="flex items-center justify-center gap-3" style={{ height: CONTROL_ZONE_H }}>
+          <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Transport">
+            <Sparkles size={14} />
+            <span className="sr-only">Transport</span>
+          </div>
+          <div className="flex items-center justify-center gap-2 h-[120px] sm:h-[170px]">
             <button
               onClick={onPlayPause}
-              className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all shadow-sm ${isPlaying ? 'bg-[#7A8476] text-[#F2F2F0]' : 'bg-[#7A8476] text-[#F2F2F0] hover:bg-[#5F665F]'}`}
+              className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${isPlaying ? 'bg-[#7A8476] text-[#F2F2F0]' : 'bg-[#7A8476] text-[#F2F2F0] hover:bg-[#5F665F]'}`}
             >
-              {isPlaying ? <Pause size={24} className="fill-current" /> : <Play size={24} className="fill-current ml-1" />}
+              {isPlaying ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current ml-0.5" />}
             </button>
             <button
               onClick={onStop}
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full border border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] flex items-center justify-center hover:bg-[#B9BCB7] transition-all"
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full border border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] flex items-center justify-center hover:bg-[#B9BCB7] transition-all"
             >
-              <Square size={20} className="fill-current" />
+              <Square size={18} className="fill-current" />
             </button>
             <button
               onClick={handleRecordToggle}
-              className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full border ${isRecording ? 'border-[#7A8476] bg-[#7A8476] text-[#F2F2F0]' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-[#B9BCB7]'} flex items-center justify-center transition-all`}
+              className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full border ${isRecording ? 'border-[#7A8476] bg-[#7A8476] text-[#F2F2F0]' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-[#B9BCB7]'} flex items-center justify-center transition-all`}
               title={isRecording ? 'Stop recording' : 'Record sample (max 10s)'}
             >
-              <Mic2 size={20} className="fill-current" />
+              <Mic2 size={18} className="fill-current" />
             </button>
           </div>
         </div>
 
         {/* MIC */}
         <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
-          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">Mic</div>
+          <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Mic">
+            <Mic2 size={14} />
+            <span className="sr-only">Mic</span>
+          </div>
           <div className="grid grid-cols-2 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
             <ControlColumn label="Gain" bottom={`${(micGain * 25).toFixed(0)}%`}>
               <Fader
@@ -354,7 +360,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
         {/* OUT */}
         <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
-          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">Out</div>
+          <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Out">
+            <Waves size={14} />
+            <span className="sr-only">Out</span>
+          </div>
           <div className="grid grid-cols-3 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
             <ControlColumn label="Peak" bottom="dB">
               <canvas ref={peakCanvasRef} width={FADER_TRACK_W} height={FADER_HEIGHT} className="rounded-sm bg-black/5" style={{ height: FADER_HEIGHT, width: FADER_TRACK_W }} />
@@ -376,7 +385,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
         {/* EQ */}
         <div className="min-w-0 bg-[#E4E5E2] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1 shadow-inner" style={{ gridTemplateRows: '16px 1fr' }}>
-          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">EQ</div>
+          <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="EQ">
+            <Sliders size={14} />
+            <span className="sr-only">EQ</span>
+          </div>
           <div className="grid grid-cols-3 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
             {(['low', 'mid', 'high'] as const).map((band) => (
               <ControlColumn key={band} label={band} bottom={`${(settings[band] as number).toFixed(1)}dB`}>
@@ -394,7 +406,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
         {/* DATA */}
         <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
-          <div className="h-4 text-[10px] uppercase tracking-widest text-[#7A8476] text-center leading-none flex items-center justify-center">Data</div>
+          <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Data">
+            <Upload size={14} />
+            <span className="sr-only">Data</span>
+          </div>
           <div className="flex flex-col items-center" style={{ height: CONTROL_ZONE_H }}>
             <div className="w-full max-w-[260px] flex justify-center">
             <button

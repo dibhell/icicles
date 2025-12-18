@@ -321,8 +321,9 @@ class AudioEngine {
     const rootPc = ((music.root % 12) + 12) % 12;
     const baseRootMidi = 48 + rootPc;
 
+    // When running in background, keep the AudioContext alive but stay effectively silent.
     const masterGain = this.ctx.createGain();
-    masterGain.gain.value = 0.05;
+    masterGain.gain.value = 0.00001;
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -352,21 +353,11 @@ class AudioEngine {
       gains.push(gain);
     });
 
-    const lfo = this.ctx.createOscillator();
-    lfo.type = 'sine';
-    lfo.frequency.value = 0.03;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 0.02;
-    lfo.connect(lfoGain).connect(masterGain.gain);
-    lfo.start();
-
     this.backgroundDrone = {
       oscillators,
       gains,
       masterGain,
       filter,
-      lfo,
-      lfoGain,
     };
   }
 
