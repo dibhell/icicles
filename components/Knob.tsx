@@ -59,8 +59,8 @@ export function Knob({
 
   const norm = useMemo(() => clamp((value - min) / (max - min || 1), 0, 1), [value, min, max]);
 
-  const START_OFFSET_DEG = -12; // tweak to align pointer/progress perfectly
-  const startDeg = 225 + START_OFFSET_DEG; // 0.0 = bottom-left-ish
+  const START_OFFSET_DEG = -80; // global offset applied to track + progress + pointer
+  const startDeg = 225 + START_OFFSET_DEG; // 0.0 start (rotated left)
   const sweepDeg = 270;
   const cw = true;
 
