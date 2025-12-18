@@ -1,105 +1,64 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-interface KnobProps {
-  label?: string;
+type KnobProps = {
   value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
   defaultValue?: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (val: number) => void;
-  format?: (val: number) => string;
+  steps?: number; // e.g. 101 -> snap every 0.01
+  sensitivity?: number; // default 0.004 (250px = +1)
+  fineSensitivity?: number; // shift held: default 0.0015
+  disabled?: boolean;
+  className?: string;
+  label?: string;
+  format?: (v: number) => string;
   color?: string;
   size?: number;
+};
+
+function clamp(x: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, x));
 }
 
-export const Knob: React.FC<KnobProps> = ({
-  label,
+function snap01(x: number, steps?: number) {
+  if (!steps || steps <= 1) return x;
+  const k = steps - 1;
+  return Math.round(x * k) / k;
+}
+
+export function Knob({
   value,
-  defaultValue,
-  min,
-  max,
-  step = 0.01,
   onChange,
+  min = 0,
+  max = 1,
+  defaultValue = 0,
+  steps,
+  sensitivity = 0.004,
+  fineSensitivity = 0.0015,
+  disabled,
+  className = '',
+  label,
   format,
   color = '#7A8476',
   size = 48,
-}) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const startY = useRef(0);
-  const startValue = useRef(0);
+}: KnobProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragState = useRef<{ startY: number; startValue: number; pointerId: number | null }>({
+    startY: 0,
+    startValue: value,
+    pointerId: null,
+  });
 
-  const range = max - min;
-  const normalized = Math.min(1, Math.max(0, (value - min) / range));
+  // Normalized value 0..1
+  const norm = useMemo(() => clamp((value - min) / (max - min || 1), 0, 1), [value, min, max]);
+
   const startDeg = -135;
   const sweepDeg = 270;
-  // Pointer points up by default (90deg), so subtract 90 to align to startDeg
-  const rotation = startDeg + normalized * sweepDeg - 90;
+  const rotation = startDeg + norm * sweepDeg - 90; // indicator up -> align to start
 
-  const sensitivity = range / 200; // 200px for full range
-
-  const processMove = (clientY: number) => {
-    const deltaY = startY.current - clientY; // up is positive
-    let newValue = startValue.current + deltaY * sensitivity;
-    if (step > 0) newValue = Math.round(newValue / step) * step;
-    newValue = Math.max(min, Math.min(max, newValue));
-    const snap = step > 0 ? step * 0.6 : 0.001;
-    if (Math.abs(newValue - min) <= snap) newValue = min;
-    if (Math.abs(newValue - max) <= snap) newValue = max;
-    if (newValue !== value) onChange(newValue);
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    startY.current = e.clientY;
-    startValue.current = value;
-    document.body.style.cursor = 'ns-resize';
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
-
-  const handleMouseMove = (e: MouseEvent) => {
-    e.preventDefault();
-    processMove(e.clientY);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    document.body.style.cursor = '';
-    window.removeEventListener('mousemove', handleMouseMove);
-    window.removeEventListener('mouseup', handleMouseUp);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    setIsDragging(true);
-    startY.current = e.touches[0].clientY;
-    startValue.current = value;
-    document.body.style.overflow = 'hidden';
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    processMove(e.touches[0].clientY);
-  };
-
-  const handleTouchEnd = () => {
-    setIsDragging(false);
-    document.body.style.overflow = '';
-  };
-
-  const handleDoubleClick = () => {
-    if (defaultValue !== undefined) onChange(defaultValue);
-  };
-
-  useEffect(() => {
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.overflow = '';
-    };
-  }, []);
-
-  // SVG arc via explicit path (start at -135°, sweep 270°)
+  // Precompute arc paths
   const strokeWidth = size * 0.1;
   const cx = size / 2;
   const cy = size / 2;
@@ -116,25 +75,85 @@ export const Knob: React.FC<KnobProps> = ({
   const trackLargeArc = sweepDeg > 180 ? 1 : 0;
   const trackPath = `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${trackLargeArc} 1 ${trackEnd.x} ${trackEnd.y}`;
 
-  const valueDeg = startDeg + sweepDeg * normalized;
+  const valueDeg = startDeg + sweepDeg * norm;
   const valueEnd = polar(valueDeg);
   const valueLargeArc = valueDeg - startDeg > 180 ? 1 : 0;
   const valuePath =
-    normalized <= 0.0001
+    norm <= 0.0001
       ? ''
       : `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${valueLargeArc} 1 ${valueEnd.x} ${valueEnd.y}`;
 
+  const applyDelta = (clientY: number, shiftKey: boolean) => {
+    const state = dragState.current;
+    const deltaY = state.startY - clientY; // up is positive
+    const sens = (shiftKey ? fineSensitivity : sensitivity) * (max - min);
+    let next = state.startValue + deltaY * sens;
+    next = clamp(next, min, max);
+    const snappedNorm = snap01((next - min) / (max - min || 1), steps);
+    const snapped = min + snappedNorm * (max - min);
+    if (snapped !== value) onChange(snapped);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const node = ref.current;
+    if (node) node.setPointerCapture(e.pointerId);
+    dragState.current = { startY: e.clientY, startValue: value, pointerId: e.pointerId };
+    setDragging(true);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    e.preventDefault();
+    applyDelta(e.clientY, e.shiftKey);
+  };
+
+  const endDrag = (e: React.PointerEvent) => {
+    const node = ref.current;
+    if (node && dragState.current.pointerId !== null) {
+      try {
+        node.releasePointerCapture(dragState.current.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    dragState.current.pointerId = null;
+    setDragging(false);
+  };
+
+  const handleDoubleClick = () => {
+    const clamped = clamp(defaultValue, min, max);
+    onChange(snap01((clamped - min) / (max - min || 1), steps) * (max - min) + min);
+  };
+
+  // Cleanup just in case
+  useEffect(() => {
+    return () => {
+      const node = ref.current;
+      if (node && dragState.current.pointerId !== null) {
+        try {
+          node.releasePointerCapture(dragState.current.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, []);
+
   return (
-    <div className="flex flex-col items-center gap-1 select-none touch-none">
+    <div className={`flex flex-col items-center gap-1 select-none touch-none ${className}`}>
       <div
+        ref={ref}
         className="relative cursor-ns-resize group touch-none"
         style={{ width: size, height: size, touchAction: 'none' }}
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
         onDoubleClick={handleDoubleClick}
-        title="Drag up/down | Double click reset"
+        title="Drag up/down | Shift for precision | Double click reset"
       >
         <svg width={size} height={size} className="drop-shadow-sm pointer-events-none">
           <path
@@ -151,7 +170,7 @@ export const Knob: React.FC<KnobProps> = ({
               stroke={color}
               strokeWidth={strokeWidth}
               strokeLinecap="round"
-              className="transition-all duration-75 ease-out"
+              className={`transition-all ${dragging ? 'duration-0' : 'duration-75 ease-out'}`}
               style={{ opacity: 0.9, filter: `drop-shadow(0 0 3px ${color}40)` }}
             />
           )}
@@ -172,7 +191,7 @@ export const Knob: React.FC<KnobProps> = ({
         )}
         <span
           className={`text-[10px] font-mono font-bold leading-none transition-colors ${
-            isDragging ? 'text-[#2E2F2B]' : 'text-[#5F665F]'
+            dragging ? 'text-[#2E2F2B]' : 'text-[#5F665F]'
           }`}
         >
           {format ? format(value) : value.toFixed(2)}
@@ -180,4 +199,5 @@ export const Knob: React.FC<KnobProps> = ({
       </div>
     </div>
   );
-};
+}
+
