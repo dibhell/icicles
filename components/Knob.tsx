@@ -175,6 +175,9 @@ export const Knob: React.FC<KnobProps> = ({
         return { x: cx + r * Math.cos(rad), y: cy + Math.sin(rad) };
     };
 
+    const c = 2 * Math.PI * r;
+    const arc = c * (sweepDeg / 360);
+
     const trackStart = polar(startDeg);
     const trackEnd = polar(startDeg + sweepDeg);
     const trackLargeArc = sweepDeg > 180 ? 1 : 0;
