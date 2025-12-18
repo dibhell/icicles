@@ -210,7 +210,7 @@ export function Knob({
             const ly1 = cy + innerR * Math.sin(angle);
             const lx2 = cx + outerR * Math.cos(angle);
             const ly2 = cy + outerR * Math.sin(angle);
-            const w = Math.max(1.6, strokeWidth * 0.26); // thicker pointer
+            const w = 3.5; // fixed pointer thickness for consistent look
             const pointerColor = color ?? '#7A8476';
             return (
               <>
