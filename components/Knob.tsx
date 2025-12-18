@@ -86,7 +86,7 @@ export function Knob({
       ? ''
       : `M ${trackStart.x} ${trackStart.y} A ${r} ${r} 0 ${valueLargeArc} 1 ${valueEnd.x} ${valueEnd.y}`;
 
-  const DRAG_THRESHOLD_PX = 6;
+  const DRAG_THRESHOLD_PX = 4;
   const DOUBLE_TAP_MS = 320;
   const DOUBLE_TAP_DIST = 18;
 
@@ -101,6 +101,7 @@ export function Knob({
     state.current.start01 = to01(value);
     state.current.moved = false;
     ref.current?.classList.add('is-pressing');
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* ignore */ }
 
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== state.current.pointerId) return;
@@ -142,6 +143,7 @@ export function Knob({
       }
 
       state.current.pointerId = -1;
+      try { ref.current?.releasePointerCapture(ev.pointerId); } catch { /* ignore */ }
       cleanup.current?.();
       cleanup.current = null;
     };
