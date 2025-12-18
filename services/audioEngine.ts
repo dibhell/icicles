@@ -17,6 +17,9 @@ class AudioEngine {
   private micGain: GainNode | null = null;
   private micMeter: AnalyserNode | null = null;
   private micStream: MediaStream | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
+  private micEnsureInFlight: Promise<void> | null = null;
+  private desiredMicGain: number = 1;
   
   private reverbNode: ConvolverNode | null = null;
   private reverbGain: GainNode | null = null;
@@ -77,9 +80,6 @@ class AudioEngine {
     this.micMeter = this.ctx.createAnalyser();
     this.micMeter.fftSize = 1024;
     this.micMeter.smoothingTimeConstant = 0.65;
-    this.micMeter = this.ctx.createAnalyser();
-    this.micMeter.fftSize = 1024;
-    this.micMeter.smoothingTimeConstant = 0.65;
 
     // Compressor (musical)
     this.compressorNode = this.ctx.createDynamicsCompressor();
@@ -106,7 +106,7 @@ class AudioEngine {
 
     // Mic chain (muted to master, for metering only)
     this.micGain = this.ctx.createGain();
-    this.micGain.gain.value = 0;
+    this.micGain.gain.value = this.desiredMicGain;
     const micSilent = this.ctx.createGain();
     micSilent.gain.value = 0;
     if (this.micMeter) {
@@ -221,6 +221,8 @@ class AudioEngine {
     if (!this.ctx) return;
     this.shouldPlay = false;
     this.stopBackgroundDrone();
+    // Keep the context alive for mic metering if a mic stream is attached.
+    if (this.micStream) return;
     try { await this.ctx.suspend(); } catch { /* ignore */ }
   }
 
@@ -522,25 +524,71 @@ class AudioEngine {
   }
 
   public setMicGain(value: number) {
-    if (!this.ctx || !this.micGain) return;
     const safe = Math.max(0, Math.min(4, value));
+    this.desiredMicGain = safe;
+    if (!this.ctx || !this.micGain) return;
     this.micGain.gain.setTargetAtTime(safe, this.ctx.currentTime, 0.05);
+  }
+
+  public getMicStream(): MediaStream | null {
+    return this.micStream;
+  }
+
+  public attachMicStream(stream: MediaStream) {
+    if (!this.ctx) return;
+
+    try { this.micSource?.disconnect(); } catch { /* ignore */ }
+    this.micSource = null;
+
+    this.micStream = stream;
+    const src = this.ctx.createMediaStreamSource(stream);
+    this.micSource = src;
+
+    if (!this.micGain) {
+      this.micGain = this.ctx.createGain();
+      this.micGain.gain.value = this.desiredMicGain;
+    }
+
+    src.connect(this.micGain);
   }
 
   public async ensureMic() {
     if (!this.ctx) return;
-    if (this.micStream) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.micStream = stream;
-      const src = this.ctx.createMediaStreamSource(stream);
-      if (!this.micGain) {
-        this.micGain = this.ctx.createGain();
-        this.micGain.gain.value = 0;
+
+    if (this.micStream) {
+      const hasLiveTrack = this.micStream.getTracks().some((t) => t.readyState === 'live');
+      if (!hasLiveTrack) {
+        try { this.micSource?.disconnect(); } catch { /* ignore */ }
+        this.micSource = null;
+        this.micStream = null;
       }
-      src.connect(this.micGain);
+    }
+
+    if (this.micStream) {
+      if (this.ctx.state !== 'running') {
+        try { await this.ctx.resume(); } catch { /* ignore */ }
+      }
+      return;
+    }
+
+    if (this.micEnsureInFlight) {
+      await this.micEnsureInFlight;
+      return;
+    }
+
+    try {
+      this.micEnsureInFlight = (async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        this.attachMicStream(stream);
+        if (this.ctx && this.ctx.state !== 'running') {
+          try { await this.ctx.resume(); } catch { /* ignore */ }
+        }
+      })();
+      await this.micEnsureInFlight;
     } catch (e) {
       console.error('Mic access failed', e);
+    } finally {
+      this.micEnsureInFlight = null;
     }
   }
 

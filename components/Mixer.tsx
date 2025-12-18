@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AudioSettings, SoundType } from '../types';
-import { Play, Pause, Square, Upload, Sliders, Mic2, XCircle, Sparkles, Waves } from 'lucide-react';
+import { Play, Pause, Square, Upload, Sliders, Mic2, XCircle, Bus, Headphones, Brush, Book } from 'lucide-react';
 import { audioService } from '../services/audioEngine';
 
 interface MixerProps {
@@ -45,6 +45,7 @@ const Fader: React.FC<FaderProps> = ({ value, min, max, defaultValue, onChange, 
   const ratio = clamp((value - min) / (max - min || 1), 0, 1);
   const travel = FADER_HEIGHT - TRACK_TOP - TRACK_BOTTOM - THUMB_RADIUS * 2;
   const thumbBottom = TRACK_BOTTOM + ratio * travel;
+  const fillHeight = Math.max(0, thumbBottom - TRACK_BOTTOM);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
@@ -98,6 +99,10 @@ const Fader: React.FC<FaderProps> = ({ value, min, max, defaultValue, onChange, 
       <div
         className="pointer-events-none absolute"
         style={{ top: TRACK_TOP, bottom: TRACK_BOTTOM, left: '50%', transform: 'translateX(-50%)', width: FADER_TRACK_W, backgroundColor: '#B9BCB7', borderRadius: 999 }}
+      />
+      <div
+        className="pointer-events-none absolute"
+        style={{ bottom: TRACK_BOTTOM, left: '50%', transform: 'translateX(-50%)', width: FADER_TRACK_W, height: fillHeight, backgroundColor: '#7A8476', borderRadius: 999, opacity: 0.95 }}
       />
       <div
         className="pointer-events-none absolute bg-[#7A8476] rounded-full shadow-sm"
@@ -187,7 +192,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await audioService.primeFromGesture();
+      await audioService.ensureMic();
+      const stream = audioService.getMicStream();
+      if (!stream) return;
       streamRef.current = stream;
       const rec = new MediaRecorder(stream);
       recorderRef.current = rec;
@@ -199,8 +207,6 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
       rec.onstop = async () => {
         const blob = new Blob(recorderChunks.current, { type: 'audio/webm' });
         recorderChunks.current = [];
-        stream.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
         if (recorderTimerRef.current) {
           clearTimeout(recorderTimerRef.current);
           recorderTimerRef.current = null;
@@ -307,7 +313,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         {/* TRANSPORT */}
         <div className="col-span-2 lg:col-span-1 min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
           <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Transport">
-            <Sparkles size={14} />
+            <Bus size={14} />
             <span className="sr-only">Transport</span>
           </div>
           <div className="flex items-center justify-center gap-2 h-[120px] sm:h-[170px]">
@@ -347,6 +353,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                 max={4}
                 defaultValue={1}
                 onChange={(v) => {
+                  if (!audioService.getMicStream()) void audioService.ensureMic();
                   setMicGain(v);
                   audioService.setMicGain(v);
                 }}
@@ -361,7 +368,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         {/* OUT */}
         <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
           <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Out">
-            <Waves size={14} />
+            <Headphones size={14} />
             <span className="sr-only">Out</span>
           </div>
           <div className="grid grid-cols-3 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
@@ -386,7 +393,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         {/* EQ */}
         <div className="min-w-0 bg-[#E4E5E2] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1 shadow-inner" style={{ gridTemplateRows: '16px 1fr' }}>
           <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="EQ">
-            <Sliders size={14} />
+            <Brush size={14} />
             <span className="sr-only">EQ</span>
           </div>
           <div className="grid grid-cols-3 justify-items-center items-center" style={{ height: CONTROL_ZONE_H }}>
@@ -407,7 +414,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         {/* DATA */}
         <div className="min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
           <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Data">
-            <Upload size={14} />
+            <Book size={14} />
             <span className="sr-only">Data</span>
           </div>
           <div className="flex flex-col items-center" style={{ height: CONTROL_ZONE_H }}>
