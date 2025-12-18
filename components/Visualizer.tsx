@@ -276,7 +276,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       isDrawingRef.current = true;
       lastSpawnPos.current = { x, y };
       spawnBubble(x, y, 50);
-      try { canvasRef.current.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      // no pointer capture needed for spawn-only
     };
 
     const handlePointerMove = (e: React.PointerEvent) => {
@@ -311,6 +311,11 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             const nx = vx / (speed || 1);
             const ny = vy / (speed || 1);
             applyJellyImpact(b, nx, ny, speed * 0.6);
+            if (b.jelly) {
+              b.jelly.rot = 0;
+              b.jelly.vrot = 0;
+              b.deformation.rotation = 0;
+            }
           }
         }
         return;
