@@ -106,7 +106,7 @@ export const Knob: React.FC<KnobProps> = ({
 
     // --- TOUCH HANDLERS (MOBILE) ---
     const onTouchStart = (e: React.TouchEvent) => {
-        // e.preventDefault(); // Sometimes needed, but can block click events
+        e.preventDefault();
         e.stopPropagation();
         
         setIsDragging(true);
@@ -155,7 +155,7 @@ export const Knob: React.FC<KnobProps> = ({
     }, []);
 
     // --- VISUALS ---
-    const normalized = (value - min) / (max - min);
+    const normalized = Math.min(1, Math.max(0, (value - min) / (max - min)));
     // 270 degree arc (-135 to +135)
     const rotation = -135 + (normalized * 270);
     
@@ -163,29 +163,32 @@ export const Knob: React.FC<KnobProps> = ({
     const strokeWidth = size * 0.1;
     const r = size / 2 - (strokeWidth); 
     const c = 2 * Math.PI * r;
-    const offset = c - normalized * (c * 0.75); // 0.75 = 270deg / 360deg
+    const arc = c * 0.75; // 270deg
+    const baseTransform = `rotate(-135 ${size / 2} ${size / 2})`;
+    const offset = arc * (1 - normalized);
 
     return (
         <div className="flex flex-col items-center gap-1 select-none touch-none">
             <div 
                 className="relative cursor-ns-resize group touch-none"
-                style={{ width: size, height: size }}
+                style={{ width: size, height: size, touchAction: 'none' }}
                 onMouseDown={onMouseDown}
                 onTouchStart={onTouchStart}
                 onDoubleClick={handleDoubleClick}
                 title="Drag up/down | Shift for precision | Double click reset"
             >
                 {/* SVG Ring */}
-                <svg width={size} height={size} className="transform rotate-90 pointer-events-none drop-shadow-sm">
+                <svg width={size} height={size} className="pointer-events-none drop-shadow-sm">
                     {/* Track */}
                     <circle
                         cx={size/2} cy={size/2} r={r}
                         fill="none"
                         stroke="#D9DBD6"
                         strokeWidth={strokeWidth}
-                        strokeDasharray={c}
-                        strokeDashoffset={c * 0.25}
+                        strokeDasharray={`${arc} ${c}`}
+                        strokeDashoffset={0}
                         strokeLinecap="round"
+                        transform={baseTransform}
                     />
                     {/* Active */}
                     <circle
@@ -193,11 +196,12 @@ export const Knob: React.FC<KnobProps> = ({
                         fill="none"
                         stroke={color}
                         strokeWidth={strokeWidth}
-                        strokeDasharray={c}
+                        strokeDasharray={`${arc} ${c}`}
                         strokeDashoffset={offset}
                         strokeLinecap="round"
                         className={`transition-[stroke-dashoffset] ${isDragging ? 'duration-0' : 'duration-200 ease-out'}`}
                         style={{ opacity: 0.9 }}
+                        transform={baseTransform}
                     />
                 </svg>
 

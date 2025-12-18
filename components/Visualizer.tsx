@@ -195,29 +195,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
 
-      // Log background panel
-      ctx.save();
-      ctx.filter = 'blur(2px)';
-      ctx.fillStyle = 'rgba(20, 26, 24, 0.6)';
-      ctx.fillRect(8, h - 150, w * 0.45, 140);
-      ctx.restore();
-
-      // Background Noise (Hex Grid)
-      ctx.save();
-      ctx.font = '8px "Courier New", monospace';
-      ctx.fillStyle = 'rgba(122, 132, 118, 0.05)';
-      for (let i = 20; i < w * 0.45; i += 100) {
-        for (let j = h - 140; j < h - 10; j += 26) {
-          if (Math.random() > 0.97) {
-            const hex = `0x${Math.floor(Math.random() * 16777215).toString(16).toUpperCase()}`;
-            ctx.fillText(hex, i, j);
-          }
-        }
-      }
-      ctx.restore();
-
       // Log Entries
-      ctx.fillStyle = 'rgba(200, 210, 205, 0.75)';
+      ctx.fillStyle = 'rgba(200, 210, 205, 0.85)';
       let y = h - 20;
       for (let i = logRef.current.length - 1; i >= 0; i--) {
         ctx.fillText(logRef.current[i], 15, y);
@@ -271,15 +250,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.fillText(p, w - 15, y);
         y += 12;
       });
-
-      // Metrics overlay top-left
-      ctx.textAlign = 'left';
-      ctx.fillStyle = 'rgba(15, 18, 16, 0.5)';
-      ctx.fillRect(12, 12, 120, 42);
-      ctx.fillStyle = 'rgba(230, 236, 232, 0.9)';
-      ctx.fillText(`dB: ${metrics.peakDb.toFixed(1)}`, 18, 18);
-      ctx.fillText(`Hz: ${Math.round(metrics.baseFreq)}`, 18, 30);
-      ctx.fillText(`OBJ: ${metrics.objects}`, 18, 42);
 
       ctx.restore();
     };
@@ -480,6 +450,64 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       }
     };
 
+    const applySchooling = (bubbles: BubbleExt[], wave: number, tempo: number, time: number) => {
+      if (wave < 0.01 || bubbles.length < 2) return;
+      const neighborR = 180 + wave * 320;
+      const neighborSq = neighborR * neighborR;
+      const sepR = 80 + wave * 120;
+      const sepSq = sepR * sepR;
+      const alignW = 0.04 * wave * Math.max(0.4, tempo);
+      const cohW = 0.02 * wave * Math.max(0.4, tempo);
+      const sepW = 0.08 * wave * Math.max(0.4, tempo);
+      const sway = 6 * wave;
+
+      for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        let count = 0;
+        let ax = 0, ay = 0, az = 0;
+        let cx = 0, cy = 0, cz = 0;
+        let sx = 0, sy = 0, sz = 0;
+
+        for (let j = 0; j < bubbles.length; j++) {
+          if (i === j) continue;
+          const o = bubbles[j];
+          const dx = o.x - b.x;
+          const dy = o.y - b.y;
+          const dz = o.z - b.z;
+          const dSq = dx * dx + dy * dy + dz * dz;
+          if (dSq > neighborSq) continue;
+          count++;
+          ax += o.vx; ay += o.vy; az += o.vz;
+          cx += o.x; cy += o.y; cz += o.z;
+          if (dSq < sepSq) {
+            const inv = 1 / Math.sqrt(Math.max(EPS, dSq));
+            sx -= dx * inv;
+            sy -= dy * inv;
+            sz -= dz * inv;
+          }
+        }
+
+        if (count > 0) {
+          const invC = 1 / count;
+          b.vx += (ax * invC - b.vx) * alignW;
+          b.vy += (ay * invC - b.vy) * alignW;
+          b.vz += (az * invC - b.vz) * alignW;
+
+          b.vx += (cx * invC - b.x) * cohW;
+          b.vy += (cy * invC - b.y) * cohW;
+          b.vz += (cz * invC - b.z) * cohW;
+        }
+
+        b.vx += sx * sepW;
+        b.vy += sy * sepW;
+        b.vz += sz * sepW;
+
+        const swayPhase = b.vertexPhases[0] ?? 0;
+        b.vx += Math.sin(time * 1.2 + b.x * 0.01 + swayPhase) * sway * 0.2;
+        b.vy += Math.cos(time * 1.1 + b.y * 0.01 + swayPhase * 0.3) * sway * 0.15;
+      }
+    };
+
     // MAIN LOOP
     useEffect(() => {
       if (containerRef.current && canvasRef.current) {
@@ -525,7 +553,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           return;
         }
 
-        const { tempo, gravity, buddingChance, cannibalism, wind, blackHole, weakness, magneto, fragmentation, freeze } = phys;
+        const { tempo, gravity, buddingChance, cannibalism, wind, blackHole, weakness, magneto, fragmentation, freeze, roomWave } = phys;
         const cx = canvas.width / 2; const cy = canvas.height / 2; const cz = DEPTH / 2;
 
         // --- PARTICLE LOOP ---
@@ -544,6 +572,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           ctx.globalAlpha = p.life;
           ctx.fillRect(x2d, y2d, size, size);
         }
+
+        // Schooling / wave behaviour (fish-like swirls)
+        applySchooling(bubbles, roomWave, tempo, time);
 
         // --- BUBBLE PHYSICS (local forces) ---
         for (let i = 0; i < bubbles.length; i++) {
