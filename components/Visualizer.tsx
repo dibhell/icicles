@@ -504,15 +504,17 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.fillStyle = gradientBack;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+        const phys = physicsRef.current;
+        const audio = audioSettingsRef.current;
+        const time = Date.now() * 0.002 * Math.max(0.1, phys.tempo || 0);
         const peakDb = audioService.getPeakLevel();
         drawMatrixLog(ctx, canvas.width, canvas.height, {
           peakDb,
           baseFreq: audio.baseFrequency,
           objects: bubblesRef.current.length,
         });
-        drawRoom(ctx, canvas.width, canvas.height, physicsRef.current.geometryWarp, physicsRef.current.roomWave, time);
+        drawRoom(ctx, canvas.width, canvas.height, phys.geometryWarp, phys.roomWave, time);
 
-        const phys = physicsRef.current;
         const bubbles = bubblesRef.current;
         const particles = particlesRef.current;
 
@@ -524,7 +526,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         }
 
         const { tempo, gravity, buddingChance, cannibalism, wind, blackHole, weakness, magneto, fragmentation, freeze } = phys;
-        const time = Date.now() * 0.002 * tempo;
         const cx = canvas.width / 2; const cy = canvas.height / 2; const cz = DEPTH / 2;
 
         // --- PARTICLE LOOP ---
