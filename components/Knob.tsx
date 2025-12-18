@@ -210,10 +210,11 @@ export function Knob({
             const lx2 = cx + outerR * Math.cos(angle);
             const ly2 = cy + outerR * Math.sin(angle);
             const w = Math.max(1.2, strokeWidth * 0.22);
+            const pointerColor = color ?? '#7A8476';
             return (
               <>
-                <line x1={lx1} y1={ly1} x2={lx2} y2={ly2} stroke="#FFFFFF" strokeWidth={w} strokeLinecap="round" />
-                <circle cx={px} cy={py} r={w * 0.75} fill="#FFFFFF" />
+                <line x1={lx1} y1={ly1} x2={lx2} y2={ly2} stroke={pointerColor} strokeWidth={w} strokeLinecap="round" />
+                <circle cx={px} cy={py} r={w * 0.75} fill={pointerColor} />
               </>
             );
           })()}
