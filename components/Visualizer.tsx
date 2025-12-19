@@ -875,7 +875,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
             // event horizon in *screen space* (projection), so it matches what the player sees
             const bhCurve = blackHoleEff * blackHoleEff;
-            const horizon = 12 + bhCurve * 80;
+            const horizon = 14 + bhCurve * 90;
             const horizonWithSize = horizon + (b.radius * scale) * 0.2;
             const horizonHit = r2d < horizonWithSize;
             let shouldSwallow = false;
@@ -898,20 +898,22 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             const ty = ux;
 
             // Newtonian-like gravity with softening + accel clamp for stability
-            const gm = 24000 * bhCurve + 4000 * blackHoleEff;
-            const soft = 3200; // px^2
-            let a = gm / (rSq + soft);
+            const gm = 32000 * bhCurve + 6000 * blackHoleEff;
+            const soft = 2500; // px^2
+            const reachFalloff = 1 / (1 + (r / 800));
+            let a = (gm / (rSq + soft)) * reachFalloff;
             const maxA = MAX_ACCEL * Math.max(0.2, tempo);
             if (a > maxA) a = maxA;
 
             // "Spin": swirl is proportional to gravity (stronger near the hole, weaker far away)
-            const aTan = a * (0.08 + 0.25 * blackHoleEff);
+            const swirlFloor = 0.02 + 0.18 * blackHoleEff;
+            const aTan = a * (0.06 + 0.22 * blackHoleEff) + swirlFloor * reachFalloff;
 
             b.vx += ux * a + tx * aTan;
             b.vy += uy * a + ty * aTan;
 
             // Depth funnel: pull towards mid-depth so bubbles don't "bounce" off the back wall.
-            const funnel = (1 / (1 + (r / 240))) * bhCurve;
+            const funnel = (1 / (1 + (r / 700))) * bhCurve;
             const dz = (DEPTH * 0.5) - b.z;
             b.vz += (dz / DEPTH) * a * (0.25 + 0.45 * blackHoleEff);
 
