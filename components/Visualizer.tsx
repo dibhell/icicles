@@ -46,6 +46,8 @@ type JellyState = {
 type BubbleExt = Bubble & {
   lastAudioAt?: number;
   jelly?: JellyState;
+  voidEnteredAt?: number;
+  voidGraceMs?: number;
 };
 
 export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
@@ -777,6 +779,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         const phys = physicsRef.current;
         const audio = audioSettingsRef.current;
         const time = Date.now() * 0.002 * Math.max(0.1, phys.tempo || 0);
+        const nowMs = performance.now();
         const peakDb = audioService.getPeakLevel();
         drawMatrixLog(ctx, canvas.width, canvas.height, {
           peakDb,
@@ -874,7 +877,20 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             const bhCurve = blackHoleEff * blackHoleEff;
             const horizon = 12 + bhCurve * 80;
             const horizonWithSize = horizon + (b.radius * scale) * 0.2;
-            if (r2d < horizonWithSize) { bubbles.splice(i, 1); i--; continue; }
+            const horizonHit = r2d < horizonWithSize;
+            let shouldSwallow = false;
+            if (horizonHit) {
+              if (!b.voidEnteredAt) {
+                b.voidEnteredAt = nowMs;
+                b.voidGraceMs = 1000 + Math.random() * 1000; // 1-2s grace to show spiral
+              }
+              const elapsed = nowMs - (b.voidEnteredAt ?? nowMs);
+              if (elapsed >= (b.voidGraceMs ?? 0)) shouldSwallow = true;
+            } else {
+              b.voidEnteredAt = undefined;
+              b.voidGraceMs = undefined;
+            }
+            if (shouldSwallow) { bubbles.splice(i, 1); i--; continue; }
 
             const ux = dx / r;
             const uy = dy / r;
