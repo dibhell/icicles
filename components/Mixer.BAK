@@ -473,30 +473,30 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             <span className="sr-only">Data</span>
           </div>
           <div className="flex flex-col items-center gap-[2px]" style={{ height: CONTROL_ZONE_H }}>
-            <div className="w-full max-w-[230px] min-w-0 px-1 py-0.5 bg-[#F2F2F0] border border-[#B9BCB7] rounded-full shadow-inner text-[9px] uppercase tracking-widest text-[#5F665F] flex items-center gap-2 overflow-hidden">
+            <div className="w-full max-w-[260px] min-w-0 px-3 py-0.5 bg-[#F2F2F0] border border-[#B9BCB7] rounded-full shadow-inner text-[9px] uppercase tracking-widest text-[#5F665F] flex items-center gap-2 overflow-hidden">
               <Database size={12} className="opacity-80" />
               <div ref={loadedWrapRef} className="flex-1 min-w-0 overflow-hidden whitespace-nowrap leading-none">
                 <span ref={loadedTextRef} className="inline-block pr-2" style={marqueeStyle}>{loadedSummary}</span>
               </div>
             </div>
 
-            <div className="w-full max-w-[230px] grid items-center gap-x-1 h-[10px] relative z-10" style={{ gridTemplateColumns: DATA_GRID_COLS }}>
-              <div className="col-start-1 w-full grid h-[16px] text-[9px] uppercase tracking-widest text-[#7A8476]">
-                {/*<span>Synth</span>*/}
+            <div className="w-full max-w-[260px] grid items-center gap-x-1 h-[16px] relative z-10" style={{ gridTemplateColumns: DATA_GRID_COLS }}>
+              <div className="col-start-1 w-full flex items-center justify-between h-[16px] text-[9px] uppercase tracking-widest text-[#7A8476] leading-none">
+                <span>Synth</span>
                 <button
                   type="button"
                   onClick={toggleSynth}
-                  className={`w-full h-[20px] rounded-full border text-[9px] leading-none tracking-widest text-center ${bank.synthEnabled ? 'bg-[#7A8476] text-white border-[#7A8476]' : 'border-[#B9BCB7] text-[#5F665F] bg-[#F2F2F0]'}`}
+                  className={`w-10 h-[16px] rounded-full border text-[9px] leading-none text-center ${bank.synthEnabled ? 'bg-[#7A8476] text-white border-[#7A8476]' : 'border-[#B9BCB7] text-[#5F665F] bg-[#F2F2F0]'}`}
                 >
-                  {bank.synthEnabled ? 'SYNTH ON' : 'SYNTH OFF'}
+                  {bank.synthEnabled ? 'On' : 'Off'}
                 </button>
               </div>
-              <div className="col-start-3" >
+              <div className="col-start-3">
                 <button
                   type="button"
                   onClick={handleLoadSamplesClick}
                   disabled={smpFull}
-                  className={`w-full h-[20px] rounded-full border text-[9px] uppercase tracking-widest leading-none transition-all ${
+                  className={`w-full h-[16px] rounded-full border text-[9px] uppercase tracking-widest leading-none transition-all ${
                     smpFull ? 'border-[#D9DBD6] text-[#C7C9C5] bg-[#F2F2F0] cursor-not-allowed' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-white'
                   }`}
                 >
@@ -505,8 +505,8 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
               </div>
             </div>
 
-            <div className="w-full max-w-[260px] flex-1 min-h- relative z-0 mt-4">
-              <div className="grid content-start gap-x-1 gap-y-[4px]" style={{ gridTemplateColumns: DATA_GRID_COLS, gridTemplateRows: 'repeat(6, 16px)' }}>
+            <div className="w-full max-w-[260px] flex-1 min-h-0 relative z-0">
+              <div className="grid content-start gap-x-1 gap-y-[2px]" style={{ gridTemplateColumns: DATA_GRID_COLS, gridTemplateRows: 'repeat(6, 16px)' }}>
                 {bank.mic.map((hasMic, idx) => {
                   const hasSmp = bank.smp[idx];
                   return (

@@ -6,6 +6,8 @@ import { quantizeMidiToScale } from '../src/music/quantize';
 
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
 
+type SourceChoice = { type: 'mic' | 'smp' | 'synth'; index?: number };
+
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -40,6 +42,14 @@ class AudioEngine {
 
   private customBuffer: AudioBuffer | null = null;
   private soundType: SoundType = SoundType.SYNTH;
+
+  // Sample banks
+  private micBank: (AudioBuffer | null)[] = new Array(6).fill(null);
+  private sampleBank: (AudioBuffer | null)[] = new Array(6).fill(null);
+  private micInsertIndex = 0;
+  private synthEnabled = true;
+  private playPool: SourceChoice[] = [];
+  private playCursor = 0;
 
   // Polyphony Management
   private activeVoices: number = 0;
@@ -496,23 +506,197 @@ class AudioEngine {
     }
   }
 
-  public async loadSample(file: File) {
-    if (!this.ctx) return;
-    try {
+  private getLoadedLabels(): string[] {
+    const labels: string[] = [];
+    this.micBank.forEach((buf, idx) => { if (buf) labels.push(`M0${idx + 1}`); });
+    this.sampleBank.forEach((buf, idx) => { if (buf) labels.push(`S0${idx + 1}`); });
+    if (this.synthEnabled) labels.push('SNT');
+    return labels;
+  }
+
+  public getBankSnapshot() {
+    return {
+      mic: this.micBank.map((b) => Boolean(b)),
+      smp: this.sampleBank.map((b) => Boolean(b)),
+      loadedLabels: this.getLoadedLabels(),
+      synthEnabled: this.synthEnabled,
+      activePoolSize: this.playPool.length,
+    };
+  }
+
+  public isMicBankFull(): boolean {
+    return this.micBank.every(Boolean);
+  }
+
+  public getActivePoolSize(): number {
+    return this.playPool.length;
+  }
+
+  public getActivePoolInfo(): { size: number; labels: string[] } {
+    return {
+      size: this.playPool.length,
+      labels: this.playPool.map((choice) => {
+        if (choice.type === 'synth') return 'SYNTH';
+        if (choice.type === 'mic' && typeof choice.index === 'number') return `M${String(choice.index + 1).padStart(2, '0')}`;
+        if (choice.type === 'smp' && typeof choice.index === 'number') return `S${String(choice.index + 1).padStart(2, '0')}`;
+        return '---';
+      }),
+    };
+  }
+
+  private updatePlayPool() {
+    const options: SourceChoice[] = [];
+    this.sampleBank.forEach((buf, idx) => { if (buf) options.push({ type: 'smp', index: idx }); });
+    this.micBank.forEach((buf, idx) => { if (buf) options.push({ type: 'mic', index: idx }); });
+    if (this.synthEnabled) options.push({ type: 'synth' });
+
+    if (options.length === 0) {
+      this.playPool = [];
+      this.playCursor = 0;
+      return;
+    }
+
+    const target = options.length >= 9 ? 9 : options.length >= 6 ? 6 : options.length > 0 ? 3 : 0;
+    const shuffled = [...options];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    const pool: SourceChoice[] = [];
+    for (let i = 0; i < shuffled.length && pool.length < target; i++) {
+      pool.push(shuffled[i]);
+    }
+    while (pool.length < target && pool.length > 0) {
+      pool.push(pool[pool.length % options.length] ?? pool[0]);
+    }
+
+    this.playPool = pool;
+    this.playCursor = 0;
+  }
+
+  private pickSource(): SourceChoice | null {
+    if (!this.playPool.length) {
+      return this.synthEnabled ? { type: 'synth' } : null;
+    }
+    const choice = this.playPool[this.playCursor % this.playPool.length];
+    this.playCursor = (this.playCursor + 1) % this.playPool.length;
+    return choice;
+  }
+
+  public assignSourceToBubble(): SourceChoice | null {
+    return this.pickSource();
+  }
+
+  public setSynthEnabled(enabled: boolean) {
+    this.synthEnabled = enabled;
+    this.updatePlayPool();
+  }
+
+  public clearMicSlot(index: number) {
+    if (index < 0 || index >= this.micBank.length) return;
+    this.micBank[index] = null;
+    this.updatePlayPool();
+  }
+
+  public clearSampleSlot(index: number) {
+    if (index < 0 || index >= this.sampleBank.length) return;
+    this.sampleBank[index] = null;
+    this.updatePlayPool();
+  }
+
+  public clearAllSamples() {
+    this.micBank = new Array(6).fill(null);
+    this.sampleBank = new Array(6).fill(null);
+    this.customBuffer = null;
+    this.soundType = SoundType.SYNTH;
+    this.updatePlayPool();
+  }
+
+  private findSlot(bank: (AudioBuffer | null)[], startIndex: number): number {
+    for (let i = startIndex; i < bank.length; i++) {
+      if (!bank[i]) return i;
+    }
+    for (let i = 0; i < startIndex; i++) {
+      if (!bank[i]) return i;
+    }
+    return -1;
+  }
+
+  public async loadSampleFiles(
+    files: FileList | File[],
+    startIndex: number = 0,
+    opts?: { overwrite?: boolean }
+  ): Promise<{ loaded: number; skipped: number; }> {
+    const arr = Array.from(files).slice(0, 6);
+    await this.init();
+    if (!this.ctx) return { loaded: 0, skipped: arr.length };
+    let slot = Math.max(0, Math.min(5, startIndex));
+    const overwrite = Boolean(opts?.overwrite);
+    let loaded = 0;
+    let skipped = 0;
+
+    for (const file of arr) {
+      try {
         const arrayBuffer = await file.arrayBuffer();
         const buf = await this.ctx.decodeAudioData(arrayBuffer);
         if (buf.duration > 10.0) {
-            console.warn('Sample too long (>10s), rejecting.');
-            return;
+          skipped += 1;
+          console.warn(`Sample too long (>10s): ${file.name}`);
+          continue;
         }
-        this.customBuffer = buf;
-        this.soundType = SoundType.SAMPLE;
+        const targetSlot = overwrite ? slot : this.findSlot(this.sampleBank, slot);
+        if (targetSlot === -1) {
+          skipped += 1;
+          continue;
+        }
+        this.sampleBank[targetSlot] = buf;
+        loaded += 1;
+        if (overwrite && targetSlot >= 5) break;
+        slot = Math.min(5, targetSlot + 1);
+      } catch (e) {
+        skipped += 1;
+        console.error('Failed to load sample', e);
+      }
+    }
+
+    this.updatePlayPool();
+    return { loaded, skipped };
+  }
+
+  public async loadMicSampleBlob(blob: Blob, targetSlot?: number): Promise<boolean> {
+    await this.init();
+    if (!this.ctx) return false;
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const buf = await this.ctx.decodeAudioData(arrayBuffer);
+      if (buf.duration > 10.0) {
+        console.warn('Recorded sample too long (>10s), rejecting.');
+        return false;
+      }
+      let slot = typeof targetSlot === 'number'
+        ? Math.max(0, Math.min(5, targetSlot))
+        : this.findSlot(this.micBank, this.micInsertIndex);
+      if (slot === -1) {
+        console.warn('Mic bank full, recording rejected.');
+        return false;
+      }
+      this.micBank[slot] = buf;
+      this.micInsertIndex = (slot + 1) % this.micBank.length;
+      this.updatePlayPool();
+      return true;
     } catch (e) {
-        console.error("Failed to load sample", e);
+      console.error('Failed to load mic sample', e);
+      return false;
     }
   }
 
+  public async loadSample(file: File) {
+    await this.loadSampleFiles([file]);
+  }
+
   public async loadSampleBlob(blob: Blob) {
+    await this.init();
     if (!this.ctx) return;
     try {
       const arrayBuffer = await blob.arrayBuffer();
@@ -521,8 +705,11 @@ class AudioEngine {
         console.warn('Recorded sample too long (>10s), rejecting.');
         return;
       }
-      this.customBuffer = buf;
-      this.soundType = SoundType.SAMPLE;
+      const target = this.findSlot(this.sampleBank, 0);
+      if (target !== -1) {
+        this.sampleBank[target] = buf;
+        this.updatePlayPool();
+      }
     } catch (e) {
       console.error("Failed to load sample from blob", e);
     }
@@ -622,16 +809,17 @@ class AudioEngine {
   }
 
   public clearSample() {
-    this.customBuffer = null;
-    this.soundType = SoundType.SYNTH;
+    this.clearAllSamples();
   }
 
   public isSampleLoaded() {
-    return this.customBuffer != null && this.soundType === SoundType.SAMPLE;
+    return this.micBank.some(Boolean) || this.sampleBank.some(Boolean);
   }
 
   public setSoundType(mode: SoundType) {
     this.soundType = mode;
+    if (mode === SoundType.SYNTH) this.synthEnabled = true;
+    this.updatePlayPool();
   }
 
   public triggerSound(
@@ -644,7 +832,8 @@ class AudioEngine {
     isReverse: boolean = false, 
     volume: number = 0.5,
     music?: MusicSettings,
-    sampleGain: number = 1
+    sampleGain: number = 1,
+    sourceOverride?: SourceChoice | null
   ) {
     if (!this.ctx) return;
     let ctxState = this.ctx.state;
@@ -758,21 +947,33 @@ class AudioEngine {
         }, 1000);
     };
 
-    if (this.soundType === SoundType.SAMPLE && this.customBuffer) {
+    let sourceChoice = sourceOverride ?? this.pickSource();
+    if (sourceChoice?.type === 'synth' && !this.synthEnabled) {
+      sourceChoice = null;
+    }
+    const sampleBuffer =
+      sourceChoice?.type === 'mic' && typeof sourceChoice.index === 'number'
+        ? this.micBank[sourceChoice.index] ?? null
+        : sourceChoice?.type === 'smp' && typeof sourceChoice.index === 'number'
+        ? this.sampleBank[sourceChoice.index] ?? null
+        : null;
+
+    if (!sampleBuffer && sourceChoice?.type !== 'synth') {
+        cleanup();
+        return;
+    }
+
+    if (sampleBuffer) {
         const source = this.ctx.createBufferSource();
-        source.buffer = this.customBuffer;
+        const bufferToUse = isReverse ? this.createReverseBuffer(sampleBuffer) : sampleBuffer;
+        source.buffer = bufferToUse;
         let rate = finalFreq / 440; 
-        if (isReverse) source.buffer = this.createReverseBuffer(this.customBuffer);
-        
-        // Safety check for rate
         if (!Number.isFinite(rate)) rate = 1.0;
         
         source.playbackRate.setValueAtTime(Math.max(0.1, Math.min(rate, 4.0)), now);
         
-        // Start envelope
         sourceGain.gain.setValueAtTime(peakVol * safeSampleGain, now);
-        // Exponential fade out
-        sourceGain.gain.exponentialRampToValueAtTime(EPSILON, now + (this.customBuffer.duration / rate));
+        sourceGain.gain.exponentialRampToValueAtTime(EPSILON, now + (bufferToUse.duration / rate));
         
         source.connect(depthFilter);
         source.onended = cleanup;

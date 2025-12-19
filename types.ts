@@ -2,9 +2,9 @@ import type { ScaleId } from './src/music/scales';
 
 export interface AudioSettings {
   volume: number; // 0 to 1
-  low: number; // -10 to 10 (dB)
-  mid: number; // -10 to 10 (dB)
-  high: number; // -10 to 10 (dB)
+  low: number; // -24 to 24 (dB)
+  mid: number; // -24 to 24 (dB)
+  high: number; // -24 to 24 (dB)
   reverbWet: number; // 0 to 1
   baseFrequency: number; // Hz
   pingPongWet: number; // 0 to 1

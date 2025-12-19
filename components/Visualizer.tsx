@@ -44,11 +44,16 @@ type JellyState = {
   nx2: number; ny2: number;
 };
 
+type SourceChoice = { type: 'mic' | 'smp' | 'synth'; index?: number };
+
 type BubbleExt = Bubble & {
   lastAudioAt?: number;
   jelly?: JellyState;
   voidEnteredAt?: number;
   voidGraceMs?: number;
+  audioSource?: SourceChoice | null;
+  labelText?: string;
+  labelUntil?: number;
 };
 
 export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
@@ -75,6 +80,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       lastY: number;
       lastT: number;
     }>({ id: null, pointerId: null, offsetX: 0, offsetY: 0, lastX: 0, lastY: 0, lastT: performance.now() });
+    const labelRef = useRef<{ nextAt: number }>({ nextAt: performance.now() + 8000 });
 
     // Matrix Log Buffer
     const logRef = useRef<string[]>([]);
@@ -219,6 +225,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         deformation: { scaleX: 1, scaleY: 1, rotation: 0 },
         jelly,
         lastAudioAt: 0,
+        audioSource: audioService.assignSourceToBubble(),
       });
 
       pushLog(`SPAWN: ${id} <R:${Math.round(radius)}>`);
@@ -369,7 +376,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         audio.baseFrequency,
         pan, depth, b.vz,
         phys.doppler, isReverse, finalVol,
-        musicSettingsRef.current
+        musicSettingsRef.current,
+        undefined,
+        b.audioSource
       );
 
       if (Math.random() > 0.85) {
@@ -409,7 +418,12 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       if (music.noThirds || scale.tags?.includes('no3rd')) scaleLabel += ' NO-3RD';
       if (scale.tags?.includes('drone')) scaleLabel += ' DRONE';
 
+      const poolInfo = audioService.getActivePoolInfo();
+      const poolLabel = poolInfo.labels.length ? poolInfo.labels.join('|') : '--';
       const params = [
+        `// PLAY_POOL`,
+        `PLAY_CNT  : ${poolInfo.size}`,
+        `PLAY_SET  : ${poolLabel}`,
         `// CORE_PHYSICS`,
         `CLK_TEMPO : ${phys.tempo.toFixed(2)}`,
         `G_FORCE   : ${phys.gravity.toFixed(2)}`,
@@ -499,7 +513,17 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.stroke();
       ctx.globalCompositeOperation = prevComp;
 
-      if (b.radius > 40) {
+      const now = performance.now();
+      if (b.labelText && b.labelUntil && now < b.labelUntil) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(60, 70, 60, 0.65)';
+        ctx.font = `bold ${Math.max(10, Math.round(r2d * 0.6))}px "Courier New", monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = Math.max(0.5, 0.9 - depthT * 0.4);
+        ctx.fillText(b.labelText, 0, 0);
+        ctx.restore();
+      } else if (b.radius > 40) {
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.font = '8px monospace';
         ctx.textAlign = 'center';
@@ -782,6 +806,25 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         const time = Date.now() * 0.002 * Math.max(0.1, phys.tempo || 0);
         const nowMs = performance.now();
         const peakDb = audioService.getPeakLevel();
+        const poolSize = audioService.getActivePoolSize();
+        if (labelRef.current.nextAt < nowMs) {
+          const shouldLabel = poolSize === 3 || poolSize === 6 || poolSize === 9;
+          if (shouldLabel) {
+            const candidates = bubblesRef.current.filter((b) => b.radius > 26);
+            if (candidates.length) {
+              const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+              chosen.labelText = String(poolSize);
+              chosen.labelUntil = nowMs + 3500 + Math.random() * 2500;
+            }
+          }
+          labelRef.current.nextAt = nowMs + 8000 + Math.random() * 12000;
+        }
+        bubblesRef.current.forEach((b) => {
+          if (b.labelUntil && b.labelUntil < nowMs) {
+            b.labelUntil = undefined;
+            b.labelText = undefined;
+          }
+        });
         drawMatrixLog(ctx, canvas.width, canvas.height, {
           peakDb,
           baseFreq: audio.baseFrequency,
