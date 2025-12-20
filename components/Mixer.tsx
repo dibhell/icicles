@@ -351,7 +351,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   }, [loadedSummary]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-4 lg:p-6 shadow-lg relative mt-6 mb-14 text-[#5F665F] font-mono tracking-widest select-none h-auto transition-all">
+    <div className="w-full max-w-6xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-4 lg:p-6 shadow-lg relative isolate mt-6 mb-14 text-[#5F665F] font-mono tracking-widest select-none h-auto transition-all">
       <style>{`
         @keyframes loaded-marquee {
           0% { transform: translateX(0); }
@@ -480,7 +480,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
               </div>
             </div>
 
-            <div className="w-full max-w-[230px] grid items-center gap-x-1 h-[10px] relative z-10" style={{ gridTemplateColumns: DATA_GRID_COLS }}>
+            <div className="w-full max-w-[230px] grid items-center gap-x-1 h-[10px]" style={{ gridTemplateColumns: DATA_GRID_COLS }}>
               <div className="col-start-1 w-full grid h-[16px] text-[9px] uppercase tracking-widest text-[#7A8476]">
                 {/*<span>Synth</span>*/}
                 <button
