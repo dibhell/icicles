@@ -23,6 +23,52 @@ const CONTROL_ZONE_H = LABEL_ROW_H + FADER_HEIGHT + VALUE_ROW_H;
 const CONTROL_COL_W = 72;
 const FADER_TRACK_W = 10; // align with VU meter width
 const DATA_GRID_COLS = '1fr 16px 1fr 16px';
+const MAX_RECORD_MS = 10000;
+
+type FallbackRecorder = {
+  ctx: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  processor: ScriptProcessorNode;
+  silent: GainNode;
+  buffers: Float32Array[];
+  sampleRate: number;
+};
+
+const encodeWav = (buffers: Float32Array[], sampleRate: number) => {
+  const length = buffers.reduce((sum, b) => sum + b.length, 0);
+  const buffer = new ArrayBuffer(44 + length * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, length * 2, true);
+
+  let offset = 44;
+  buffers.forEach((buf) => {
+    for (let i = 0; i < buf.length; i++) {
+      const sample = Math.max(-1, Math.min(1, buf[i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  });
+
+  return new Blob([view.buffer], { type: 'audio/wav' });
+};
 
 type FaderProps = {
   value: number;
@@ -147,10 +193,11 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   const recorderChunks = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderTimerRef = useRef<number | null>(null);
+  const fallbackRecorderRef = useRef<FallbackRecorder | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [bank, setBank] = useState(audioService.getBankSnapshot());
-  const [micGain, setMicGain] = useState(1);
+  const [micGain, setMicGain] = useState(2.6);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sampleLoadRef = useRef({ startIndex: 0, overwrite: false });
   const recordSlotRef = useRef<number | null>(null);
@@ -158,8 +205,13 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   const loadedTextRef = useRef<HTMLSpanElement>(null);
   const [loadedShift, setLoadedShift] = useState(0);
   const [loadedDuration, setLoadedDuration] = useState(12);
+  const sampleInputId = 'sample-input';
 
   const handleEQChange = (band: 'low' | 'mid' | 'high', val: number) => {
+    const nextLow = band === 'low' ? val : settings.low;
+    const nextMid = band === 'mid' ? val : settings.mid;
+    const nextHigh = band === 'high' ? val : settings.high;
+    audioService.setEqGains(nextLow, nextMid, nextHigh);
     setSettings(prev => ({ ...prev, [band]: val }));
   };
 
@@ -177,15 +229,18 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
       sampleLoadRef.current = { startIndex: 0, overwrite: false };
     }
   };
-
-  const handleLoadSamplesClick = () => {
-    sampleLoadRef.current = { startIndex: 0, overwrite: false };
-    fileInputRef.current?.click();
+  const prepareSampleLoad = (startIndex: number, overwrite: boolean, disabled?: boolean) => (e: React.SyntheticEvent) => {
+    if (disabled) {
+      e.preventDefault();
+      return;
+    }
+    sampleLoadRef.current = { startIndex, overwrite };
   };
 
-  const handleSampleSlotLoad = (slot: number) => {
-    sampleLoadRef.current = { startIndex: slot, overwrite: true };
-    fileInputRef.current?.click();
+  const handleRecordPointerDown = (slot?: number) => (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType !== 'touch') return;
+    e.preventDefault();
+    void handleRecordToggle(slot);
   };
 
   const handleClearMicSlot = (slot: number) => {
@@ -212,14 +267,74 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
     return '';
   };
 
+  const stopFallbackRecording = async () => {
+    const fallback = fallbackRecorderRef.current;
+    if (!fallback) return;
+    fallbackRecorderRef.current = null;
+    if (recorderTimerRef.current) {
+      clearTimeout(recorderTimerRef.current);
+      recorderTimerRef.current = null;
+    }
+    try {
+      fallback.processor.disconnect();
+      fallback.source.disconnect();
+      fallback.silent.disconnect();
+      await fallback.ctx.close();
+    } catch {
+      // ignore
+    }
+    setIsRecording(false);
+    const blob = encodeWav(fallback.buffers, fallback.sampleRate);
+    const stored = await audioService.loadMicSampleBlob(blob, recordSlotRef.current ?? undefined);
+    recordSlotRef.current = null;
+    if (stored) refreshBank();
+  };
+
+  const startFallbackRecording = async (stream: MediaStream) => {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    const silent = ctx.createGain();
+    silent.gain.value = 0;
+    const buffers: Float32Array[] = [];
+
+    processor.onaudioprocess = (ev) => {
+      if (!fallbackRecorderRef.current) return;
+      buffers.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+    };
+
+    source.connect(processor);
+    processor.connect(silent);
+    silent.connect(ctx.destination);
+    try { await ctx.resume(); } catch { /* ignore */ }
+
+    fallbackRecorderRef.current = {
+      ctx,
+      source,
+      processor,
+      silent,
+      buffers,
+      sampleRate: ctx.sampleRate,
+    };
+
+    recorderTimerRef.current = window.setTimeout(() => {
+      if (fallbackRecorderRef.current) void stopFallbackRecording();
+    }, MAX_RECORD_MS);
+    setIsRecording(true);
+  };
+
   const handleRecordToggle = async (slot?: number) => {
-    if (isRecording && recorderRef.current) {
+    if (recorderRef.current?.state === 'recording') {
       recorderRef.current.stop();
       if (recorderTimerRef.current) {
         clearTimeout(recorderTimerRef.current);
         recorderTimerRef.current = null;
       }
       setIsRecording(false);
+      return;
+    }
+    if (fallbackRecorderRef.current) {
+      await stopFallbackRecording();
       return;
     }
 
@@ -232,10 +347,15 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
       recordSlotRef.current = hasTargetSlot ? slot : null;
       await audioService.primeFromGesture();
       await audioService.ensureMic({ fromUserGesture: true });
-      const stream = audioService.getMicStream();
-      if (!stream || typeof MediaRecorder === 'undefined') {
+      audioService.setMicGain(micGain);
+      const stream = audioService.getMicRecordStream();
+      if (!stream) {
         recordSlotRef.current = null;
         console.error('Recording not supported in this browser/environment.');
+        return;
+      }
+      if (typeof MediaRecorder === 'undefined') {
+        await startFallbackRecording(stream);
         return;
       }
       streamRef.current = stream;
@@ -266,7 +386,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         if (rec.state === 'recording') {
           rec.stop();
         }
-      }, 10000);
+      }, MAX_RECORD_MS);
       setIsRecording(true);
     } catch (err) {
       recordSlotRef.current = null;
@@ -276,7 +396,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
   useEffect(() => {
     void audioService.ensureMic();
-    audioService.setMicGain(1);
+    audioService.setMicGain(2.6);
     const peakCtx = peakCanvasRef.current?.getContext('2d');
     const mainCtx = mainCanvasRef.current?.getContext('2d');
     const micCtx = micVURef.current?.getContext('2d');
@@ -319,7 +439,8 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
 
   const micFull = bank.mic.every(Boolean);
   const smpFull = bank.smp.every(Boolean);
-  const recordDisabled = micFull && !isRecording;
+  const isRecorderActive = isRecording || recorderRef.current?.state === 'recording' || Boolean(fallbackRecorderRef.current);
+  const recordDisabled = micFull && !isRecorderActive;
   const formatSlots = (slots: boolean[]) => {
     const ids = slots
       .map((hasSample, idx) => (hasSample ? String(idx + 1).padStart(2, '0') : null))
@@ -359,7 +480,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
           100% { transform: translateX(0); }
         }
       `}</style>
-      <div className="absolute top-4 left-6 text-[10px] text-[#7A8476] flex items-center gap-2">
+      <div className="flex items-center gap-2 text-[10px] text-[#7A8476] h-4 pl-2 mb-2">
         <Sliders size={12} /> MASTER CONTROL
       </div>
 
@@ -385,6 +506,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             </button>
             <button
               onClick={handleRecordToggle}
+              onPointerDown={handleRecordPointerDown()}
               disabled={recordDisabled}
               className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full border ${isRecording ? 'border-[#7A8476] bg-[#7A8476] text-[#F2F2F0]' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-[#B9BCB7]'} flex items-center justify-center transition-all ${recordDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
               title={isRecording ? 'Stop recording' : 'Record sample (max 10s)'}
@@ -406,7 +528,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                 value={micGain}
                 min={0}
                 max={4}
-                defaultValue={1}
+                defaultValue={2.6}
                 onChange={(v) => {
                   if (!audioService.getMicStream()) void audioService.ensureMic({ fromUserGesture: true });
                   setMicGain(v);
@@ -439,7 +561,10 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                 min={0}
                 max={1}
                 defaultValue={0.7}
-                onChange={(v) => setSettings(p => ({ ...p, volume: v }))}
+                onChange={(v) => {
+                  audioService.setMasterGain(v);
+                  setSettings(p => ({ ...p, volume: v }));
+                }}
               />
             </ControlColumn>
           </div>
@@ -473,7 +598,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             <span className="sr-only">Data</span>
           </div>
           <div className="flex flex-col items-center gap-[4px]" style={{ height: CONTROL_ZONE_H }}>
-            <div className="w-full max-w-[260px] min-w-0 px-1 py-0.5 bg-[#F2F2F0] border border-[#B9BCB7] rounded-full shadow-inner text-[9px] uppercase tracking-widest text-[#5F665F] flex items-center gap-2 overflow-hidden">
+            <div className="w-[230px] min-w-[230px] max-w-[230px] shrink-0 px-1 py-0.5 bg-[#F2F2F0] border border-[#B9BCB7] rounded-full shadow-inner text-[9px] uppercase tracking-widest text-[#5F665F] flex items-center gap-2 overflow-hidden">
               <Database size={12} className="opacity-80" />
               <div ref={loadedWrapRef} className="flex-1 min-w-0 overflow-hidden whitespace-nowrap leading-none">
                 <span ref={loadedTextRef} className="inline-block pr-2" style={marqueeStyle}>{loadedSummary}</span>
@@ -491,16 +616,19 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                 </button>
               </div>
               <div className="col-start-3 flex items-center h-[16px]">
-                <button
-                  type="button"
-                  onClick={handleLoadSamplesClick}
-                  disabled={smpFull}
-                  className={`w-full h-[16px] rounded-full border text-[9px] uppercase tracking-widest leading-none transition-all ${
+                <label
+                  htmlFor={sampleInputId}
+                  role="button"
+                  tabIndex={smpFull ? -1 : 0}
+                  onPointerDown={prepareSampleLoad(0, false, smpFull)}
+                  onClick={prepareSampleLoad(0, false, smpFull)}
+                  aria-disabled={smpFull}
+                  className={`w-full h-[16px] rounded-full border text-[9px] uppercase tracking-widest leading-none transition-all flex items-center justify-center ${
                     smpFull ? 'border-[#D9DBD6] text-[#C7C9C5] bg-[#F2F2F0] cursor-not-allowed' : 'border-[#B9BCB7] bg-[#F2F2F0] text-[#5F665F] hover:bg-white'
                   }`}
                 >
                   Load Samples
-                </button>
+                </label>
               </div>
             </div>
 
@@ -513,6 +641,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                       <button
                         type="button"
                         onClick={() => handleRecordToggle(idx)}
+                        onPointerDown={handleRecordPointerDown(idx)}
                         className={`w-full h-[16px] rounded-full border px-3 flex items-center justify-center text-[9px] tracking-widest uppercase leading-none transition-all ${
                           hasMic ? 'bg-[#7A8476] text-[#F2F2F0] border-[#7A8476]' : 'bg-[#F2F2F0] text-[#5F665F] border-[#B9BCB7] hover:bg-white'
                         }`}
@@ -529,15 +658,18 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
                       >
                         <XCircle size={9} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSampleSlotLoad(idx)}
+                      <label
+                        htmlFor={sampleInputId}
+                        role="button"
+                        tabIndex={0}
+                        onPointerDown={prepareSampleLoad(idx, true)}
+                        onClick={prepareSampleLoad(idx, true)}
                         className={`w-full h-[16px] rounded-full border px-3 flex items-center justify-center text-[9px] tracking-widest uppercase leading-none transition-all ${
                           hasSmp ? 'bg-[#7A8476] text-[#F2F2F0] border-[#7A8476]' : 'bg-[#F2F2F0] text-[#5F665F] border-[#B9BCB7] hover:bg-white'
                         }`}
                       >
                         SMP0{idx + 1}
-                      </button>
+                      </label>
                       <button
                         type="button"
                         onClick={() => handleClearSampleSlot(idx)}
@@ -555,11 +687,12 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             </div>
 
             <input
+              id={sampleInputId}
               ref={fileInputRef}
               type="file"
               accept="audio/*"
               multiple
-              className="hidden"
+              className="absolute opacity-0 w-px h-px overflow-hidden pointer-events-none"
               onChange={handleFileUpload}
             />
           </div>

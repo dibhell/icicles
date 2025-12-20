@@ -4,6 +4,7 @@ import { Knob } from './Knob';
 type BufferedKnobProps = {
   value: number;
   onCommit: (v: number) => void;
+  live?: boolean;
   min?: number;
   max?: number;
   defaultValue?: number;
@@ -26,6 +27,7 @@ type BufferedKnobProps = {
 export function BufferedKnob({
   value,
   onCommit,
+  live = false,
   min = 0,
   max = 1,
   defaultValue = 0,
@@ -42,6 +44,8 @@ export function BufferedKnob({
   const [uiValue, setUiValue] = useState(value);
   const dirtyRef = useRef(false);
   const timerRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const pendingRef = useRef<number | null>(null);
 
   const commitNow = useCallback(
     (next?: number) => {
@@ -52,6 +56,11 @@ export function BufferedKnob({
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      pendingRef.current = null;
     },
     [onCommit, uiValue]
   );
@@ -73,6 +82,13 @@ export function BufferedKnob({
   const handleChange = (v: number) => {
     dirtyRef.current = true;
     setUiValue(v);
+    if (live) {
+      pendingRef.current = v;
+      if (rafRef.current == null) {
+        rafRef.current = requestAnimationFrame(() => commitNow(pendingRef.current ?? v));
+      }
+      return;
+    }
     scheduleCommit(v);
   };
 
@@ -89,6 +105,7 @@ export function BufferedKnob({
   }, [commitNow]);
 
   useEffect(() => () => timerRef.current && clearTimeout(timerRef.current), []);
+  useEffect(() => () => rafRef.current && cancelAnimationFrame(rafRef.current), []);
 
   return (
     <Knob

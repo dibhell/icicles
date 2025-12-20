@@ -5,8 +5,110 @@ import { freqToMidi, midiToFreq, snapMidiToPitchClass } from '../src/music/notes
 import { quantizeMidiToScale } from '../src/music/quantize';
 
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
+const WET_BOOST = 5;
+const applyWetBoost = (raw: number) => {
+  const v = clamp(raw, 0, 1);
+  if (v <= 0) return 0;
+  if (v >= 1) return 1;
+  return (v * WET_BOOST) / (1 + (WET_BOOST - 1) * v);
+};
 
 type SourceChoice = { type: 'mic' | 'smp' | 'synth'; index?: number };
+
+const GRANULAR_WORKLET_CODE = `
+class GranularStretchProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: 'stretch', defaultValue: 1.0, minValue: 0.5, maxValue: 2.5 },
+      { name: 'mix', defaultValue: 0.0, minValue: 0.0, maxValue: 1.0 },
+      { name: 'grainSize', defaultValue: 0.08, minValue: 0.02, maxValue: 0.2 },
+    ];
+  }
+  constructor() {
+    super();
+    this.bufferSize = Math.floor(sampleRate * 1.2);
+    this.buffer = new Float32Array(this.bufferSize);
+    this.writeIndex = 0;
+    this.grains = [];
+    this.grainClock = 0;
+    this.lastGrainSize = Math.max(16, Math.floor(sampleRate * 0.08));
+  }
+  _spawnGrain(stretch, grainSamples) {
+    const delaySamples = Math.max(grainSamples + 32, Math.floor(sampleRate * 0.05));
+    let start = this.writeIndex - delaySamples;
+    if (start < 0) start += this.bufferSize;
+    if (this.grains.length >= 4) this.grains.shift();
+    this.grains.push({
+      pos: start,
+      age: 0,
+      len: grainSamples,
+      rate: 1 / Math.max(0.5, Math.min(2.5, stretch)),
+    });
+  }
+  _readSample(pos) {
+    const i0 = Math.floor(pos);
+    const i1 = (i0 + 1) % this.bufferSize;
+    const t = pos - i0;
+    const a = this.buffer[i0] || 0;
+    const b = this.buffer[i1] || 0;
+    return a + (b - a) * t;
+  }
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    const output = outputs[0];
+    if (!output || output.length === 0) return true;
+    const inCh = input && input[0] ? input[0] : null;
+    const outCh = output[0];
+    const stretchArr = parameters.stretch;
+    const mixArr = parameters.mix;
+    const grainArr = parameters.grainSize;
+
+    for (let i = 0; i < outCh.length; i++) {
+      const x = inCh ? inCh[i] : 0;
+      this.buffer[this.writeIndex] = x;
+
+      const stretch = stretchArr.length > 1 ? stretchArr[i] : stretchArr[0];
+      const mix = mixArr.length > 1 ? mixArr[i] : mixArr[0];
+      const grainSec = grainArr.length > 1 ? grainArr[i] : grainArr[0];
+      const grainSamples = Math.max(16, Math.floor(sampleRate * grainSec));
+      if (grainSamples !== this.lastGrainSize) this.lastGrainSize = grainSamples;
+
+      this.grainClock++;
+      const spacing = Math.max(8, Math.floor(this.lastGrainSize * 0.5));
+      if (this.grainClock >= spacing || this.grains.length === 0) {
+        this.grainClock = 0;
+        this._spawnGrain(stretch, this.lastGrainSize);
+      }
+
+      let wet = 0;
+      let norm = 0;
+      let alive = 0;
+      for (let g = 0; g < this.grains.length; g++) {
+        const grain = this.grains[g];
+        if (grain.age >= grain.len) continue;
+        const t = grain.age / grain.len;
+        const win = 0.5 - 0.5 * Math.cos(2 * Math.PI * t);
+        wet += this._readSample(grain.pos) * win;
+        norm += win;
+        grain.pos += grain.rate;
+        if (grain.pos >= this.bufferSize) grain.pos -= this.bufferSize;
+        grain.age++;
+        this.grains[alive++] = grain;
+      }
+      this.grains.length = alive;
+
+      const wetOut = norm > 0 ? wet / norm : 0;
+      const m = Math.max(0, Math.min(1, mix));
+      outCh[i] = x * (1 - m) + wetOut * m;
+
+      this.writeIndex++;
+      if (this.writeIndex >= this.bufferSize) this.writeIndex = 0;
+    }
+    return true;
+  }
+}
+registerProcessor('granular-stretch', GranularStretchProcessor);
+`;
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -16,12 +118,23 @@ class AudioEngine {
   private limiterNode: DynamicsCompressorNode | null = null;
   private mainAnalyser: AnalyserNode | null = null;
   private peakAnalyser: AnalyserNode | null = null;
+  private stereoSplitter: ChannelSplitterNode | null = null;
+  private stereoAnalyserL: AnalyserNode | null = null;
+  private stereoAnalyserR: AnalyserNode | null = null;
+  private stereoBufferL: Float32Array | null = null;
+  private stereoBufferR: Float32Array | null = null;
+  private lastDelayTimes: { left: number; right: number } | null = null;
   private micGain: GainNode | null = null;
+  private micComp: DynamicsCompressorNode | null = null;
+  private micLimiter: DynamicsCompressorNode | null = null;
   private micMeter: AnalyserNode | null = null;
+  private micRecordDest: MediaStreamAudioDestinationNode | null = null;
   private micStream: MediaStream | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
   private micEnsureInFlight: Promise<void> | null = null;
-  private desiredMicGain: number = 1;
+  private desiredMicGain: number = 2.6;
+  private desiredMasterGain: number = 0.7;
+  private lastAudioSettings: AudioSettings | null = null;
   
   private reverbNode: ConvolverNode | null = null;
   private reverbGain: GainNode | null = null;
@@ -34,6 +147,10 @@ class AudioEngine {
   private feedbackL: GainNode | null = null;
   private feedbackR: GainNode | null = null;
   private pingPongMerger: ChannelMergerNode | null = null;
+  private pingPongReturn: GainNode | null = null;
+  private granularNode: AudioWorkletNode | null = null;
+  private granularGain: GainNode | null = null;
+  private spatialControl = { pan: 0, depth: 0, width: 0 };
   
   // EQ Nodes
   private lowEQ: BiquadFilterNode | null = null;
@@ -87,6 +204,13 @@ class AudioEngine {
     this.peakAnalyser = this.ctx.createAnalyser();
     this.peakAnalyser.fftSize = 256;
     this.peakAnalyser.smoothingTimeConstant = 0.6;
+    this.stereoSplitter = this.ctx.createChannelSplitter(2);
+    this.stereoAnalyserL = this.ctx.createAnalyser();
+    this.stereoAnalyserL.fftSize = 256;
+    this.stereoAnalyserL.smoothingTimeConstant = 0.7;
+    this.stereoAnalyserR = this.ctx.createAnalyser();
+    this.stereoAnalyserR.fftSize = 256;
+    this.stereoAnalyserR.smoothingTimeConstant = 0.7;
     this.micMeter = this.ctx.createAnalyser();
     this.micMeter.fftSize = 1024;
     this.micMeter.smoothingTimeConstant = 0.65;
@@ -112,15 +236,33 @@ class AudioEngine {
 
     // Master Gain - Boosted significantly
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 1.0; 
+    this.masterGain.gain.value = this.desiredMasterGain; 
 
     // Mic chain (muted to master, for metering only)
     this.micGain = this.ctx.createGain();
     this.micGain.gain.value = this.desiredMicGain;
+    this.micComp = this.ctx.createDynamicsCompressor();
+    this.micComp.threshold.value = -18;
+    this.micComp.ratio.value = 3.5;
+    this.micComp.attack.value = 0.003;
+    this.micComp.release.value = 0.25;
+    this.micComp.knee.value = 6;
+
+    this.micLimiter = this.ctx.createDynamicsCompressor();
+    this.micLimiter.threshold.value = -1.5;
+    this.micLimiter.knee.value = 8;
+    this.micLimiter.ratio.value = 20;
+    this.micLimiter.attack.value = 0.002;
+    this.micLimiter.release.value = 0.2;
+
+    this.micRecordDest = this.ctx.createMediaStreamDestination();
     const micSilent = this.ctx.createGain();
     micSilent.gain.value = 0;
     if (this.micMeter) {
-      this.micGain.connect(this.micMeter);
+      this.micGain.connect(this.micComp);
+      this.micComp.connect(this.micLimiter);
+      this.micLimiter.connect(this.micMeter);
+      if (this.micRecordDest) this.micLimiter.connect(this.micRecordDest);
       this.micMeter.connect(micSilent);
       micSilent.connect(this.ctx.destination);
     }
@@ -147,19 +289,29 @@ class AudioEngine {
 
     // --- PING PONG DELAY SETUP ---
     this.pingPongInput = this.ctx.createGain();
-    this.pingPongInput.gain.value = 0; 
+    this.pingPongInput.gain.value = 1;
     this.delayL = this.ctx.createDelay();
     this.delayR = this.ctx.createDelay();
     this.feedbackL = this.ctx.createGain();
     this.feedbackR = this.ctx.createGain();
     this.pingPongMerger = this.ctx.createChannelMerger(2);
+    this.pingPongReturn = this.ctx.createGain();
+    this.pingPongReturn.gain.value = 0;
 
     this.delayL.delayTime.value = 0.35; 
     this.delayR.delayTime.value = 0.5; 
     this.feedbackL.gain.value = 0.3; 
     this.feedbackR.gain.value = 0.3;
 
+    await this.ensureGranularNode();
     this.pingPongInput.connect(this.delayL);
+    if (this.granularNode) {
+      this.granularGain = this.ctx.createGain();
+      this.granularGain.gain.value = 0.6;
+      this.pingPongInput.connect(this.granularNode);
+      this.granularNode.connect(this.granularGain);
+      this.granularGain.connect(this.delayL);
+    }
     this.delayL.connect(this.pingPongMerger, 0, 0);
     this.delayL.connect(this.feedbackL).connect(this.delayR);
     this.delayR.connect(this.pingPongMerger, 0, 1);
@@ -170,7 +322,8 @@ class AudioEngine {
     
     this.reverbGain.connect(this.lowEQ);
     this.dryGain.connect(this.lowEQ);
-    this.pingPongMerger.connect(this.lowEQ);
+    this.pingPongMerger.connect(this.pingPongReturn);
+    this.pingPongReturn.connect(this.lowEQ);
 
     this.lowEQ.connect(this.midEQ);
     this.midEQ.connect(this.highEQ);
@@ -181,12 +334,18 @@ class AudioEngine {
     // tap peak before limiter
     this.makeupGain.connect(this.peakAnalyser);
     this.limiterNode.connect(this.mainAnalyser);
+    if (this.stereoSplitter && this.stereoAnalyserL && this.stereoAnalyserR) {
+      this.limiterNode.connect(this.stereoSplitter);
+      this.stereoSplitter.connect(this.stereoAnalyserL, 0);
+      this.stereoSplitter.connect(this.stereoAnalyserR, 1);
+    }
     this.mainAnalyser.connect(this.masterGain);
     this.masterGain.connect(this.ctx.destination);
 
     this.installLifecycle();
     this.installGestureUnlock();
 
+    if (this.lastAudioSettings) this.updateSettings(this.lastAudioSettings);
     try { await this.ctx.resume(); } catch { /* ignore */ }
   }
 
@@ -203,12 +362,37 @@ class AudioEngine {
     return 20 * Math.log10(max);
   }
 
+  private static extractPeakLinear(
+    analyser: AnalyserNode | null,
+    buffer: Float32Array | null
+  ): { level: number; buffer: Float32Array | null } {
+    if (!analyser) return { level: 0, buffer };
+    const size = analyser.fftSize;
+    let data = buffer;
+    if (!data || data.length !== size) data = new Float32Array(size);
+    analyser.getFloatTimeDomainData(data);
+    let max = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]);
+      if (v > max) max = v;
+    }
+    return { level: Math.min(1, max), buffer: data };
+  }
+
   public getMainLevel(): number {
     return AudioEngine.extractPeakDb(this.mainAnalyser);
   }
 
   public getPeakLevel(): number {
     return AudioEngine.extractPeakDb(this.peakAnalyser);
+  }
+
+  public getStereoLevels(): { left: number; right: number } {
+    const left = AudioEngine.extractPeakLinear(this.stereoAnalyserL, this.stereoBufferL);
+    this.stereoBufferL = left.buffer;
+    const right = AudioEngine.extractPeakLinear(this.stereoAnalyserR, this.stereoBufferR);
+    this.stereoBufferR = right.buffer;
+    return { left: left.level, right: right.level };
   }
 
   public async resume(): Promise<void> {
@@ -296,6 +480,27 @@ class AudioEngine {
     window.addEventListener('pointerdown', unlock, { passive: true });
     window.addEventListener('keydown', unlock);
     window.addEventListener('touchstart', unlock, { passive: true });
+  }
+
+  private async ensureGranularNode(): Promise<void> {
+    if (!this.ctx || this.granularNode || !this.ctx.audioWorklet) return;
+    try {
+      const blob = new Blob([GRANULAR_WORKLET_CODE], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      try {
+        await this.ctx.audioWorklet.addModule(url);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      this.granularNode = new AudioWorkletNode(this.ctx, 'granular-stretch', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
+    } catch (e) {
+      console.warn('Granular worklet unavailable, skipping stretch.', e);
+      this.granularNode = null;
+    }
   }
 
   private async iosSilentTick(): Promise<void> {
@@ -464,10 +669,12 @@ class AudioEngine {
   }
 
   public updateSettings(settings: AudioSettings) {
+    this.lastAudioSettings = settings;
+    const safeVol = Number.isFinite(settings.volume) ? clamp(settings.volume, 0, 1) : this.desiredMasterGain;
+    this.desiredMasterGain = safeVol;
     if (!this.ctx) return;
 
     if (this.masterGain) {
-        const safeVol = Number.isFinite(settings.volume) ? settings.volume : 0;
         this.masterGain.gain.setTargetAtTime(safeVol, this.ctx.currentTime, 0.1);
     }
 
@@ -495,14 +702,89 @@ class AudioEngine {
     if (this.highEQ) this.highEQ.gain.setTargetAtTime(settings.high || 0, this.ctx.currentTime, 0.1);
 
     if (this.reverbGain && this.dryGain) {
-        const wet = Number.isFinite(settings.reverbWet) ? settings.reverbWet : 0.3;
+        const wetRaw = Number.isFinite(settings.reverbWet) ? settings.reverbWet : 0.3;
+        const wet = applyWetBoost(wetRaw);
         this.reverbGain.gain.setTargetAtTime(wet, this.ctx.currentTime, 0.1);
         this.dryGain.gain.setTargetAtTime(1 - (wet * 0.5), this.ctx.currentTime, 0.1);
     }
 
-    if (this.pingPongInput) {
-        const pingWet = Number.isFinite(settings.pingPongWet) ? settings.pingPongWet : 0;
-        this.pingPongInput.gain.setTargetAtTime(pingWet, this.ctx.currentTime, 0.1);
+    const pingWetRaw = Number.isFinite(settings.pingPongWet) ? settings.pingPongWet : 0;
+    this.updatePingPongParams(pingWetRaw, settings.baseFrequency);
+  }
+
+  private updatePingPongParams(raw: number, baseFrequency?: number) {
+    if (!this.ctx) return;
+    const safe = clamp(raw, 0, 1);
+    const wet = applyWetBoost(safe);
+    if (this.pingPongReturn) {
+      this.pingPongReturn.gain.setTargetAtTime(wet, this.ctx.currentTime, 0.1);
+    }
+
+    const tail = Math.pow(safe, 1.3);
+    const feedback = clamp(0.2 + tail * 0.7, 0.2, 0.9);
+    if (this.feedbackL) this.feedbackL.gain.setTargetAtTime(feedback, this.ctx.currentTime, 0.15);
+    if (this.feedbackR) this.feedbackR.gain.setTargetAtTime(feedback, this.ctx.currentTime, 0.15);
+
+    this.updatePingPongDelayTimes(baseFrequency);
+
+    if (this.granularNode) {
+      const stretch = 1 + wet * 0.8;
+      const grain = 0.05 + wet * 0.07;
+      this.granularNode.parameters.get('stretch')?.setTargetAtTime(stretch, this.ctx.currentTime, 0.05);
+      this.granularNode.parameters.get('mix')?.setTargetAtTime(1, this.ctx.currentTime, 0.05);
+      this.granularNode.parameters.get('grainSize')?.setTargetAtTime(grain, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  private updatePingPongDelayTimes(baseFrequency?: number) {
+    if (!this.ctx || !this.delayL || !this.delayR) return;
+    const baseFreq = (Number.isFinite(baseFrequency) && (baseFrequency ?? 0) > 0)
+      ? baseFrequency!
+      : (Number.isFinite(this.lastAudioSettings?.baseFrequency) ? this.lastAudioSettings!.baseFrequency : 220);
+    const music = this.lastMusicSettings;
+    const rootPc = Number.isFinite(music?.root) ? music!.root : 0;
+    const rootMidi = snapMidiToPitchClass(freqToMidi(baseFreq), rootPc);
+    const rootFreq = midiToFreq(rootMidi);
+    const scale = getScaleById(music?.scaleId);
+    const intervals = scale.intervals.length ? scale.intervals : [0];
+    let secondary = intervals.includes(7) ? 7 : intervals[Math.min(3, intervals.length - 1)] ?? 0;
+    if (secondary === 0 && intervals.length > 1) secondary = intervals[1];
+
+    const ratioL = 1;
+    const ratioR = Math.pow(2, secondary / 12);
+    const basePeriod = 1 / Math.max(30, rootFreq);
+    const target = 0.45;
+    const mult = Math.max(1, Math.round(target / basePeriod));
+    let baseTime = clamp(basePeriod * mult, 0.24, 0.85);
+
+    let left = baseTime * ratioL;
+    let right = baseTime * ratioR;
+    const maxVal = Math.max(left, right);
+    if (maxVal > 0.85) {
+      const scaleDown = 0.85 / maxVal;
+      left *= scaleDown;
+      right *= scaleDown;
+    }
+    const minVal = Math.min(left, right);
+    if (minVal < 0.22) {
+      const scaleUp = 0.22 / minVal;
+      left *= scaleUp;
+      right *= scaleUp;
+    }
+    left = clamp(left, 0.22, 0.85);
+    right = clamp(right, 0.22, 0.85);
+
+    const last = this.lastDelayTimes;
+    const eps = 0.002;
+    const timeConst = 0.25;
+    if (!last || Math.abs(left - last.left) > eps) {
+      this.delayL.delayTime.setTargetAtTime(left, this.ctx.currentTime, timeConst);
+    }
+    if (!last || Math.abs(right - last.right) > eps) {
+      this.delayR.delayTime.setTargetAtTime(right, this.ctx.currentTime, timeConst);
+    }
+    if (!last || Math.abs(left - last.left) > eps || Math.abs(right - last.right) > eps) {
+      this.lastDelayTimes = { left, right };
     }
   }
 
@@ -722,8 +1004,56 @@ class AudioEngine {
     this.micGain.gain.setTargetAtTime(safe, this.ctx.currentTime, 0.05);
   }
 
+  public setMasterGain(value: number) {
+    const safe = Number.isFinite(value) ? clamp(value, 0, 1) : this.desiredMasterGain;
+    this.desiredMasterGain = safe;
+    if (!this.ctx || !this.masterGain) return;
+    this.masterGain.gain.setTargetAtTime(safe, this.ctx.currentTime, 0.1);
+  }
+
+  public setEqGains(low: number, mid: number, high: number) {
+    if (!this.ctx) return;
+    const safeLow = Number.isFinite(low) ? clamp(low, -24, 24) : 0;
+    const safeMid = Number.isFinite(mid) ? clamp(mid, -24, 24) : 0;
+    const safeHigh = Number.isFinite(high) ? clamp(high, -24, 24) : 0;
+    if (this.lowEQ) this.lowEQ.gain.setTargetAtTime(safeLow, this.ctx.currentTime, 0.05);
+    if (this.midEQ) this.midEQ.gain.setTargetAtTime(safeMid, this.ctx.currentTime, 0.05);
+    if (this.highEQ) this.highEQ.gain.setTargetAtTime(safeHigh, this.ctx.currentTime, 0.05);
+  }
+
+  public setPingPongWet(value: number) {
+    const safe = Number.isFinite(value) ? clamp(value, 0, 1) : 0;
+    if (this.lastAudioSettings) {
+      this.lastAudioSettings = { ...this.lastAudioSettings, pingPongWet: safe };
+    }
+    this.updatePingPongParams(safe, this.lastAudioSettings?.baseFrequency);
+  }
+
+  public setReverbWet(value: number) {
+    const safe = Number.isFinite(value) ? clamp(value, 0, 1) : 0;
+    if (this.lastAudioSettings) {
+      this.lastAudioSettings = { ...this.lastAudioSettings, reverbWet: safe };
+    }
+    if (!this.ctx || !this.reverbGain || !this.dryGain) return;
+    const wet = applyWetBoost(safe);
+    this.reverbGain.gain.setTargetAtTime(wet, this.ctx.currentTime, 0.1);
+    this.dryGain.gain.setTargetAtTime(1 - (wet * 0.5), this.ctx.currentTime, 0.1);
+  }
+
+  public setSpatialControl(pan: number, depth: number, width: number) {
+    this.spatialControl = {
+      pan: clamp(pan, -1, 1),
+      depth: clamp(depth, -1, 1),
+      width: clamp(width, -1, 1),
+    };
+  }
+
   public getMicStream(): MediaStream | null {
     return this.micStream;
+  }
+
+  public getMicRecordStream(): MediaStream | null {
+    return this.micRecordDest?.stream ?? this.micStream;
   }
 
   public attachMicStream(stream: MediaStream) {
@@ -740,7 +1070,10 @@ class AudioEngine {
       this.micGain = this.ctx.createGain();
       this.micGain.gain.value = this.desiredMicGain;
     }
-
+    if (this.micComp && this.micGain) {
+      try { this.micGain.disconnect(); } catch { /* ignore */ }
+      this.micGain.connect(this.micComp);
+    }
     src.connect(this.micGain);
   }
 
@@ -780,7 +1113,12 @@ class AudioEngine {
             sampleRate: 48000,
           },
         };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
         stream.getAudioTracks().forEach((t) => { t.enabled = true; });
         this.attachMicStream(stream);
         if (this.ctx && this.ctx.state !== 'running') {
@@ -868,14 +1206,29 @@ class AudioEngine {
     const now = this.ctx.currentTime;
     
     // --- SPATIAL CHAIN ---
-    const panner = this.ctx.createStereoPanner();
-    panner.pan.value = safePan;
+    const spatial = this.spatialControl;
+    const panWith = clamp(safePan + spatial.pan * 0.9, -1, 1);
+    const depthWith = clamp(safeDepth + spatial.depth * 0.6, 0, 1);
+    const widthScale = clamp(1 + spatial.width * 1.1, 0.2, 2.2);
+
+    const panner = this.ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 1;
+    panner.maxDistance = 6;
+    panner.rolloffFactor = 0;
+    panner.coneInnerAngle = 360;
+    panner.coneOuterAngle = 0;
+    panner.coneOuterGain = 0;
+    panner.positionX.setValueAtTime(panWith * 2.2 * widthScale, now);
+    panner.positionY.setValueAtTime(0, now);
+    panner.positionZ.setValueAtTime(-0.6 - (depthWith * 4.6), now);
 
     const depthFilter = this.ctx.createBiquadFilter();
     depthFilter.type = 'lowpass';
     const minCutoff = 1000;
     const maxCutoff = 22000;
-    const cutoff = maxCutoff * Math.pow(minCutoff / maxCutoff, safeDepth);
+    const cutoff = maxCutoff * Math.pow(minCutoff / maxCutoff, depthWith);
     depthFilter.frequency.value = cutoff;
     depthFilter.Q.value = 0; 
 
@@ -971,9 +1324,17 @@ class AudioEngine {
         if (!Number.isFinite(rate)) rate = 1.0;
         
         source.playbackRate.setValueAtTime(Math.max(0.1, Math.min(rate, 4.0)), now);
-        
-        sourceGain.gain.setValueAtTime(peakVol * safeSampleGain, now);
-        sourceGain.gain.exponentialRampToValueAtTime(EPSILON, now + (bufferToUse.duration / rate));
+
+        const duration = bufferToUse.duration / rate;
+        const targetGain = peakVol * safeSampleGain;
+        const attack = Math.min(0.01, duration * 0.2);
+        const fadeOut = Math.min(0.08, duration * 0.3);
+        const fadeStart = now + Math.max(attack, duration - fadeOut);
+
+        sourceGain.gain.setValueAtTime(EPSILON, now);
+        sourceGain.gain.linearRampToValueAtTime(targetGain, now + attack);
+        sourceGain.gain.setValueAtTime(targetGain, fadeStart);
+        sourceGain.gain.exponentialRampToValueAtTime(EPSILON, now + duration);
         
         source.connect(depthFilter);
         source.onended = cleanup;
@@ -1000,7 +1361,8 @@ class AudioEngine {
 
         // --- ENVELOPE ---
         const attack = 0.005;
-        const decay = 1.5; 
+        const decay = 1.5;
+        const release = 0.06;
 
         // Start at silence (EPSILON)
         sourceGain.gain.setValueAtTime(EPSILON, now);
@@ -1008,9 +1370,10 @@ class AudioEngine {
         sourceGain.gain.linearRampToValueAtTime(peakVol, now + attack);
         // Exponential ramp back to silence (safe because start value is peakVol >= EPSILON)
         sourceGain.gain.exponentialRampToValueAtTime(EPSILON, now + decay);
+        sourceGain.gain.setValueAtTime(EPSILON, now + decay + release);
 
         osc.start(now);
-        osc.stop(now + decay + 0.1);
+        osc.stop(now + decay + release);
         osc.onended = cleanup;
     }
   }

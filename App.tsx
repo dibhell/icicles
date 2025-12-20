@@ -50,6 +50,7 @@ type KnobWithIconProps = {
   step?: number;
   onIconClick?: () => void;
   children?: React.ReactNode;
+  live?: boolean;
 };
 
 const KnobWithIcon: React.FC<KnobWithIconProps> = ({
@@ -61,11 +62,13 @@ const KnobWithIcon: React.FC<KnobWithIconProps> = ({
   step = 0.01,
   onIconClick,
   children,
+  live = false,
 }) => (
   <div className="flex flex-col items-center gap-2 group relative w-20" title={label}>
     <BufferedKnob
       value={value}
       onCommit={onChange}
+      live={live}
       min={0}
       max={1}
       steps={step ? Math.round(1 / step) + 1 : undefined}
@@ -357,15 +360,33 @@ const App: React.FC = () => {
             <KnobWithIcon value={physicsKnobs.freeze} onChange={(v) => setKnob('freeze', v)} icon={Snowflake} label="Freeze" defaultValue={0.0} />
             <KnobWithIcon value={physicsKnobs.reverse} onChange={(v) => setKnob('reverse', v)} icon={RotateCcw} label="Reverse" defaultValue={0.0} />
             <KnobWithIcon value={physicsKnobs.weakness} onChange={(v) => setKnob('weakness', v)} icon={Droplets} label="Weakness" defaultValue={0.0} />
-            <KnobWithIcon value={physicsKnobs.geometryWarp} onChange={(v) => setKnob('geometryWarp', v)} icon={Orbit} label="Geometry" defaultValue={0.0} />
+            <KnobWithIcon value={physicsKnobs.geometryWarp} onChange={(v) => setKnob('geometryWarp', v)} icon={Orbit} label="Geometry" defaultValue={0.0} live />
             <KnobWithIcon value={physicsKnobs.roomWave} onChange={(v) => setKnob('roomWave', v)} icon={Fish} label="Wave" defaultValue={0.0} />
           </div>
 
           <div className="relative flex flex-wrap justify-center gap-4 px-4 py-8 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
             <GroupLabel text="Creative" />
             <KnobWithIcon value={physicsKnobs.tuning} onChange={(v) => setKnob('tuning', v)} icon={AudioLines} label="Tuning" defaultValue={0.5} />
-            <KnobWithIcon value={physicsKnobs.reverb} onChange={(v) => setKnob('reverb', v)} icon={Waves} label="Reverb" defaultValue={0.3} />
-            <KnobWithIcon value={physicsKnobs.pingPong} onChange={(v) => setKnob('pingPong', v)} icon={GalleryHorizontalEnd} label="Delay" defaultValue={0.0} />
+            <KnobWithIcon
+              value={physicsKnobs.reverb}
+              onChange={(v) => {
+                setKnob('reverb', v);
+                audioService.setReverbWet(v);
+              }}
+              icon={Waves}
+              label="Reverb"
+              defaultValue={0.3}
+            />
+            <KnobWithIcon
+              value={physicsKnobs.pingPong}
+              onChange={(v) => {
+                setKnob('pingPong', v);
+                audioService.setPingPongWet(v);
+              }}
+              icon={GalleryHorizontalEnd}
+              label="Delay"
+              defaultValue={0.0}
+            />
             <KnobWithIcon value={physicsKnobs.doppler} onChange={(v) => setKnob('doppler', v)} icon={Radar} label="Doppler" defaultValue={0.5} />
             <KnobWithIcon value={physicsKnobs.magneto} onChange={(v) => setKnob('magneto', v)} icon={Magnet} label="Magneto" defaultValue={0.5} />
             <KnobWithIcon
@@ -468,7 +489,7 @@ const App: React.FC = () => {
             <GroupLabel text="Destructive" />
             <KnobWithIcon value={physicsKnobs.budding} onChange={(v) => setKnob('budding', v)} icon={Sprout} label="Budding" defaultValue={0.0} />
             <KnobWithIcon value={physicsKnobs.cannibalism} onChange={(v) => setKnob('cannibalism', v)} icon={Merge} label="Merge" defaultValue={0.0} />
-            <KnobWithIcon value={physicsKnobs.blackHole} onChange={(v) => setKnob('blackHole', v)} icon={Disc} label="Void" defaultValue={0.0} />
+            <KnobWithIcon value={physicsKnobs.blackHole} onChange={(v) => setKnob('blackHole', v)} icon={Disc} label="Void" defaultValue={0.0} live />
             <KnobWithIcon value={physicsKnobs.fragmentation} onChange={(v) => setKnob('fragmentation', v)} icon={Scissors} label="Shred" defaultValue={0.0} />
           </div>
         </div>

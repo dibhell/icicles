@@ -20,6 +20,13 @@ export interface VisualizerHandle {
 const DEPTH = 1000;
 const FOCAL_LENGTH = 700;
 const VERTEX_COUNT = 8;
+const FPS_TARGET = 120;
+const FPS_OK = FPS_TARGET * 0.5;
+const FPS_RECOVER = FPS_TARGET * 0.25;
+const FPS_GOOD = FPS_TARGET * 0.9;
+const FPS_GUARD_OK = 40;
+const FPS_GUARD_RECOVER = 30;
+const FPS_GUARD_GOOD = 55;
 
 // ---- STABILITY GUARDS (no design change) ----
 const EPS = 1e-6;
@@ -34,7 +41,190 @@ const MAX_ACCEL = 6;             // per frame contribution (tempo-scaled below)
 
 // Audio spam guard (optional but helps when magneto pins on walls)
 const AUDIO_COOLDOWN_MS = 50;
+const REFLECT_RANGE = 160;
+const REFLECT_BACK_RANGE = 220;
+const GYRO_MARGIN = 8;
+const GYRO_RADIUS_MIN = 22;
+const GYRO_RADIUS_MAX = 36;
+const GYRO_THICKNESS = 4;
+const GYRO_GAP = 5;
+const GYRO_HANDLE = 3.5;
+const MAGNETO_BOOST = 2.6;
+const SHRED_GRACE_MS = 1400;
 const VOID_PLANE_Z = DEPTH * 0.95; // inner back wall plane for Void sink
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const BUBBLE_COLORS = [
+  'hsla(60, 5%, 95%, 1)',   // Snow White
+  'hsla(180, 10%, 85%, 1)', // Icy Grey
+  'hsla(100, 10%, 80%, 1)', // Pale Moss
+  'hsla(200, 15%, 90%, 1)', // Cold Blue
+];
+type DigitChar = '3' | '6' | '9';
+type DigitOverlay = { digit: DigitChar; since: number; until: number };
+type GyroRingId = 'pan' | 'depth' | 'width';
+const DOT_FONT: Record<string, string[]> = {
+  '0': [
+    '1111',
+    '1001',
+    '1001',
+    '1001',
+    '1001',
+    '1001',
+    '1111',
+  ],
+  '1': [
+    '0010',
+    '0110',
+    '0010',
+    '0010',
+    '0010',
+    '0010',
+    '0111',
+  ],
+  '2': [
+    '1111',
+    '0001',
+    '0001',
+    '1111',
+    '1000',
+    '1000',
+    '1111',
+  ],
+  '3': [
+    '1111',
+    '0001',
+    '0001',
+    '0111',
+    '0001',
+    '0001',
+    '1111',
+  ],
+  '4': [
+    '1001',
+    '1001',
+    '1001',
+    '1111',
+    '0001',
+    '0001',
+    '0001',
+  ],
+  '5': [
+    '1111',
+    '1000',
+    '1000',
+    '1111',
+    '0001',
+    '0001',
+    '1111',
+  ],
+  '6': [
+    '1111',
+    '1000',
+    '1000',
+    '1111',
+    '1001',
+    '1001',
+    '1111',
+  ],
+  '7': [
+    '1111',
+    '0001',
+    '0001',
+    '0010',
+    '0100',
+    '0100',
+    '0100',
+  ],
+  '8': [
+    '1111',
+    '1001',
+    '1001',
+    '1111',
+    '1001',
+    '1001',
+    '1111',
+  ],
+  '9': [
+    '1111',
+    '1001',
+    '1001',
+    '1111',
+    '0001',
+    '0001',
+    '1111',
+  ],
+  'S': [
+    '01111',
+    '10000',
+    '10000',
+    '01110',
+    '00001',
+    '00001',
+    '11110',
+  ],
+  'N': [
+    '10001',
+    '11001',
+    '10101',
+    '10011',
+    '10001',
+    '10001',
+    '10001',
+  ],
+  'T': [
+    '11111',
+    '00100',
+    '00100',
+    '00100',
+    '00100',
+    '00100',
+    '00100',
+  ],
+  'M': [
+    '10001',
+    '11011',
+    '10101',
+    '10001',
+    '10001',
+    '10001',
+    '10001',
+  ],
+  'I': [
+    '11111',
+    '00100',
+    '00100',
+    '00100',
+    '00100',
+    '00100',
+    '11111',
+  ],
+  'C': [
+    '01111',
+    '10000',
+    '10000',
+    '10000',
+    '10000',
+    '10000',
+    '01111',
+  ],
+  'P': [
+    '11110',
+    '10001',
+    '10001',
+    '11110',
+    '10000',
+    '10000',
+    '10000',
+  ],
+};
+const DIGIT_OVERLAY_FADE_MS = 700;
+const DIGIT_OVERLAY_MIN_R2D = 14;
+const DIGIT_IMPACT_COOLDOWN_MS = 140;
+const TESLA_JUMP_PROB = 0.35;
+const TESLA_MIN_DIST = 80;
+const TESLA_SPARKS = 9;
+const PUFF_PARTICLES = 12;
+const PUFF_VELOCITY = 6;
 
 type JellyState = {
   sx: number; sy: number; rot: number;
@@ -45,6 +235,21 @@ type JellyState = {
 };
 
 type SourceChoice = { type: 'mic' | 'smp' | 'synth'; index?: number };
+const pad2 = (value: number) => String(value).padStart(2, '0');
+const getSourceLabel = (source: SourceChoice | null): string => {
+  if (!source) return '';
+  if (source.type === 'synth') return 'SNT';
+  if (source.type === 'mic' && typeof source.index === 'number') return `MIC${pad2(source.index + 1)}`;
+  if (source.type === 'smp' && typeof source.index === 'number') return `SMP${pad2(source.index + 1)}`;
+  return '';
+};
+const isSourceValid = (source: SourceChoice | null, bank: { mic: boolean[]; smp: boolean[]; synthEnabled: boolean }) => {
+  if (!source) return false;
+  if (source.type === 'synth') return bank.synthEnabled;
+  if (source.type === 'mic' && typeof source.index === 'number') return Boolean(bank.mic[source.index]);
+  if (source.type === 'smp' && typeof source.index === 'number') return Boolean(bank.smp[source.index]);
+  return false;
+};
 
 type BubbleExt = Bubble & {
   lastAudioAt?: number;
@@ -52,8 +257,12 @@ type BubbleExt = Bubble & {
   voidEnteredAt?: number;
   voidGraceMs?: number;
   audioSource?: SourceChoice | null;
-  labelText?: string;
-  labelUntil?: number;
+  digitOverlay?: DigitOverlay;
+  digitImpactsLeft?: number;
+  lastDigitImpactAt?: number;
+  labelAlpha?: number;
+  labelTargetAlpha?: number;
+  spawnedAt?: number;
 };
 
 export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
@@ -80,7 +289,40 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       lastY: number;
       lastT: number;
     }>({ id: null, pointerId: null, offsetX: 0, offsetY: 0, lastX: 0, lastY: 0, lastT: performance.now() });
-    const labelRef = useRef<{ nextAt: number }>({ nextAt: performance.now() + 8000 });
+    const digitRef = useRef<{ nextAt: number }>({ nextAt: performance.now() + 8000 });
+    const gyroStateRef = useRef({ pan: 0, depth: 0, width: 0 });
+    const manualGyroRef = useRef({ pan: 0, depth: 0, width: 0 });
+    const gyroDragRef = useRef<{ active: boolean; pointerId: number | null; ring: GyroRingId | null }>({
+      active: false,
+      pointerId: null,
+      ring: null,
+    });
+    const gyroHintRef = useRef({ until: 0 });
+    const stereoRef = useRef({ left: 0, right: 0 });
+    const gyroTapRef = useRef<{ time: number; ring: GyroRingId | null }>({ time: 0, ring: null });
+    const makeGyroAutoChannel = () => {
+      const speed = (Math.random() * 0.6 + 0.2) * (Math.random() < 0.5 ? -1 : 1);
+      const amp = 0.35 + Math.random() * 0.35;
+      const bias = (Math.random() - 0.5) * 0.3;
+      return {
+        phase: Math.random() * Math.PI * 2,
+        speed,
+        speedTarget: speed,
+        amp,
+        ampTarget: amp,
+        bias,
+        biasTarget: bias,
+      };
+    };
+    const gyroAutoRef = useRef({
+      enabled: false,
+      blend: 0,
+      lastAt: performance.now(),
+      nextShiftAt: performance.now() + 3000,
+      pan: makeGyroAutoChannel(),
+      depth: makeGyroAutoChannel(),
+      width: makeGyroAutoChannel(),
+    });
 
     // Matrix Log Buffer
     const logRef = useRef<string[]>([]);
@@ -104,6 +346,12 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         bubblesRef.current = [];
         particlesRef.current = [];
         logRef.current = [];
+        gyroStateRef.current = { pan: 0, depth: 0, width: 0 };
+        manualGyroRef.current = { pan: 0, depth: 0, width: 0 };
+        gyroAutoRef.current.enabled = false;
+        gyroAutoRef.current.blend = 0;
+        gyroHintRef.current.until = 0;
+        audioService.setSpatialControl(0, 0, 0);
       },
     }));
 
@@ -112,6 +360,131 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       const line = `[${ts}] ${msg}`;
       logRef.current.push(line);
       if (logRef.current.length > 16) logRef.current.shift();
+    };
+
+    const clampSigned = (v: number) => Math.max(-1, Math.min(1, v));
+    const valueToAngle = (v: number) => clampSigned(v) * Math.PI;
+    const angleToValue = (ang: number) => clampSigned(ang / Math.PI);
+
+    const getGyroLayout = (w: number, h: number) => {
+      const base = Math.max(GYRO_RADIUS_MIN, Math.min(GYRO_RADIUS_MAX, Math.min(w, h) * 0.07));
+      const r0 = base;
+      const r1 = r0 + GYRO_THICKNESS + GYRO_GAP;
+      const r2 = r1 + GYRO_THICKNESS + GYRO_GAP;
+      const outer = r2 + GYRO_THICKNESS;
+      const cx = GYRO_MARGIN + outer;
+      const cy = GYRO_MARGIN + outer;
+      const rings: { id: GyroRingId; r: number }[] = [
+        { id: 'pan', r: r0 },
+        { id: 'depth', r: r1 },
+        { id: 'width', r: r2 },
+      ];
+      return { cx, cy, rings, outer };
+    };
+
+    const getGyroAutoLayout = (layout: ReturnType<typeof getGyroLayout>) => {
+      const innerR = Math.max(8, layout.rings[0].r - GYRO_THICKNESS * 1.4);
+      const circleR = Math.max(6, innerR * 0.42);
+      const circleGap = circleR * 0.7;
+      const autoR = Math.max(4.5, circleR * 0.55) + 2;
+      const autoY = circleR + circleGap * 0.6 + autoR - 4;
+      return { innerR, circleR, circleGap, autoR, autoY };
+    };
+
+    const hitTestGyro = (x: number, y: number, layout: ReturnType<typeof getGyroLayout>) => {
+      const dx = x - layout.cx;
+      const dy = y - layout.cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      let hit: GyroRingId | null = null;
+      let best = Infinity;
+      layout.rings.forEach((ring) => {
+        const diff = Math.abs(dist - ring.r);
+        if (diff <= GYRO_THICKNESS * 1.4 && diff < best) {
+          best = diff;
+          hit = ring.id;
+        }
+      });
+      if (!hit) return null;
+      const angle = Math.atan2(dy, dx);
+      return { ring: hit, value: angleToValue(angle) };
+    };
+
+    const applyGyroOutput = (next: { pan: number; depth: number; width: number }) => {
+      gyroStateRef.current = next;
+      audioService.setSpatialControl(next.pan, next.depth, next.width);
+    };
+
+    const updateGyroAuto = (nowMs: number) => {
+      const auto = gyroAutoRef.current;
+      const dt = Math.min(0.05, Math.max(0, (nowMs - auto.lastAt) / 1000));
+      auto.lastAt = nowMs;
+      if (dt <= 0) return;
+
+      const targetBlend = auto.enabled ? 1 : 0;
+      auto.blend += (targetBlend - auto.blend) * Math.min(1, dt * 0.6);
+      auto.blend = clamp01(auto.blend);
+
+      const shouldShift = auto.enabled && nowMs >= auto.nextShiftAt;
+      if (shouldShift) {
+        const retarget = (ch: typeof auto.pan) => {
+          ch.speedTarget = (Math.random() * 0.9 + 0.15) * (Math.random() < 0.5 ? -1 : 1);
+          ch.ampTarget = 0.25 + Math.random() * 0.65;
+          ch.biasTarget = (Math.random() - 0.5) * 0.35;
+        };
+        retarget(auto.pan);
+        retarget(auto.depth);
+        retarget(auto.width);
+        auto.nextShiftAt = nowMs + 4500 + Math.random() * 7000;
+      }
+
+      const step = (ch: typeof auto.pan) => {
+        ch.speed += (ch.speedTarget - ch.speed) * dt * 0.6;
+        ch.amp += (ch.ampTarget - ch.amp) * dt * 0.4;
+        ch.bias += (ch.biasTarget - ch.bias) * dt * 0.3;
+        ch.phase += ch.speed * dt;
+      };
+
+      if (!auto.enabled && auto.blend <= 0.01) return;
+      step(auto.pan);
+      step(auto.depth);
+      step(auto.width);
+
+      const autoPan = clampSigned(auto.pan.bias + Math.sin(auto.pan.phase) * auto.pan.amp);
+      const autoDepth = clampSigned(auto.depth.bias + Math.sin(auto.depth.phase) * auto.depth.amp);
+      const autoWidth = clampSigned(auto.width.bias + Math.sin(auto.width.phase) * auto.width.amp);
+
+      const manual = manualGyroRef.current;
+      const blend = auto.blend;
+      const next = {
+        pan: manual.pan + (autoPan - manual.pan) * blend,
+        depth: manual.depth + (autoDepth - manual.depth) * blend,
+        width: manual.width + (autoWidth - manual.width) * blend,
+      };
+      applyGyroOutput(next);
+    };
+
+    const setManualGyro = (ring: GyroRingId, value: number) => {
+      const next = { ...manualGyroRef.current };
+      if (ring === 'pan') next.pan = clampSigned(value);
+      if (ring === 'depth') next.depth = clampSigned(value);
+      if (ring === 'width') next.width = clampSigned(value);
+      manualGyroRef.current = next;
+      if (!gyroAutoRef.current.enabled && gyroAutoRef.current.blend < 0.02) {
+        applyGyroOutput(next);
+      }
+      gyroHintRef.current.until = performance.now() + 1400;
+    };
+
+    const toggleGyroAuto = () => {
+      const auto = gyroAutoRef.current;
+      const wasEnabled = auto.enabled;
+      auto.enabled = !auto.enabled;
+      auto.lastAt = performance.now();
+      auto.nextShiftAt = auto.lastAt + 2000 + Math.random() * 5000;
+      if (wasEnabled) {
+        manualGyroRef.current = { ...gyroStateRef.current };
+      }
+      gyroHintRef.current.until = performance.now() + 1400;
     };
 
     const applyJellyImpact = (b: BubbleExt, nx: number, ny: number, impulse: number) => {
@@ -188,14 +561,24 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       });
     };
 
+    const spawnPuff = (b: BubbleExt) => {
+      for (let i = 0; i < PUFF_PARTICLES; i++) {
+        particlesRef.current.push({
+          x: b.x,
+          y: b.y,
+          z: b.z,
+          vx: (Math.random() - 0.5) * PUFF_VELOCITY,
+          vy: (Math.random() - 0.5) * PUFF_VELOCITY,
+          vz: (Math.random() - 0.5) * (PUFF_VELOCITY * 0.6),
+          life: 0.6,
+          color: b.color,
+          size: Math.random() * 1.6 + 0.4,
+        });
+      }
+    };
+
     const spawnBubble = (x: number, y: number, z: number = 0, r?: number) => {
-      const variants = [
-        'hsla(60, 5%, 95%, 1)',   // Snow White
-        'hsla(180, 10%, 85%, 1)', // Icy Grey
-        'hsla(100, 10%, 80%, 1)', // Pale Moss
-        'hsla(200, 15%, 90%, 1)', // Cold Blue
-      ];
-      const color = variants[Math.floor(Math.random() * variants.length)];
+      const color = BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)];
       const radius = r || Math.random() * 35 + 15;
       const jelly: JellyState = {
         sx: 1, sy: 1, rot: 0,
@@ -210,6 +593,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       const charge = Math.random() > 0.5 ? 1 : -1;
       const id = uuidv4().substring(0, 6).toUpperCase();
 
+      const audioSource = audioService.assignSourceToBubble();
+      const hasLabel = Boolean(audioSource);
+      const spawnedAt = performance.now();
       bubblesRef.current.push({
         id,
         x, y, z: z || Math.random() * (DEPTH * 0.5),
@@ -225,10 +611,86 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         deformation: { scaleX: 1, scaleY: 1, rotation: 0 },
         jelly,
         lastAudioAt: 0,
-        audioSource: audioService.assignSourceToBubble(),
+        audioSource,
+        labelAlpha: hasLabel ? 0.6 : 0,
+        labelTargetAlpha: hasLabel ? 0.6 : 0,
+        spawnedAt,
       });
 
       pushLog(`SPAWN: ${id} <R:${Math.round(radius)}>`);
+    };
+
+    const assignDigitOverlay = (digit: DigitChar, nowMs: number) => {
+      const bubbles = bubblesRef.current;
+      if (!bubbles.length) return;
+      if (bubbles.some((b) => b.digitOverlay)) return;
+
+      const candidates = bubbles.filter((b) => {
+        if (b.digitOverlay) return false;
+        const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
+        return b.radius * scale >= DIGIT_OVERLAY_MIN_R2D;
+      });
+      if (!candidates.length) return;
+
+      candidates.sort((a, b) => b.radius - a.radius);
+      const slice = Math.max(1, Math.floor(candidates.length * 0.35));
+      const pick = candidates[Math.floor(Math.random() * slice)];
+      const impacts = parseInt(digit, 10);
+      pick.digitOverlay = {
+        digit,
+        since: nowMs,
+        until: Number.POSITIVE_INFINITY,
+      };
+      pick.digitImpactsLeft = Number.isFinite(impacts) ? impacts : undefined;
+      pick.lastDigitImpactAt = undefined;
+    };
+
+    const registerDigitImpact = (b: BubbleExt, nowMs: number) => {
+      if (!b.digitOverlay || !b.digitImpactsLeft) return;
+      if (b.lastDigitImpactAt && (nowMs - b.lastDigitImpactAt) < DIGIT_IMPACT_COOLDOWN_MS) return;
+      b.lastDigitImpactAt = nowMs;
+      b.digitImpactsLeft -= 1;
+      if (b.digitImpactsLeft <= 0) return;
+      if (Math.random() < TESLA_JUMP_PROB) teslaJump(b, nowMs);
+    };
+
+    const spawnTeslaArc = (from: BubbleExt, to: BubbleExt) => {
+      const sparks = TESLA_SPARKS;
+      for (let i = 0; i < sparks; i++) {
+        const t = sparks <= 1 ? 0.5 : i / (sparks - 1);
+        const jitter = 10;
+        const x = from.x + (to.x - from.x) * t + (Math.random() - 0.5) * jitter;
+        const y = from.y + (to.y - from.y) * t + (Math.random() - 0.5) * jitter;
+        const z = from.z + (to.z - from.z) * t + (Math.random() - 0.5) * jitter * 0.6;
+        spawnParticle(x, y, z, 'rgba(190, 220, 255, 0.95)');
+      }
+    };
+
+    const teslaJump = (from: BubbleExt, nowMs: number) => {
+      const bubbles = bubblesRef.current;
+      const overlay = from.digitOverlay;
+      if (!overlay) return;
+      const candidates = bubbles.filter((b) => {
+        if (b === from) return false;
+        if (b.digitOverlay) return false;
+        const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
+        if (b.radius * scale < DIGIT_OVERLAY_MIN_R2D) return false;
+        const dx = b.x - from.x;
+        const dy = b.y - from.y;
+        const dz = b.z - from.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        return distSq >= TESLA_MIN_DIST * TESLA_MIN_DIST;
+      });
+      if (!candidates.length) return;
+      const target = candidates[Math.floor(Math.random() * candidates.length)];
+      spawnTeslaArc(from, target);
+      const impactsLeft = from.digitImpactsLeft;
+      from.digitOverlay = undefined;
+      from.digitImpactsLeft = undefined;
+      from.lastDigitImpactAt = undefined;
+      target.digitOverlay = { ...overlay, since: nowMs, until: Number.POSITIVE_INFINITY };
+      target.digitImpactsLeft = impactsLeft;
+      target.lastDigitImpactAt = nowMs;
     };
 
     const project2D = (b: BubbleExt, w: number, h: number) => {
@@ -257,6 +719,28 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+      const gyroLayout = getGyroLayout(canvasRef.current.width, canvasRef.current.height);
+      const autoLayout = getGyroAutoLayout(gyroLayout);
+      const autoDx = x - gyroLayout.cx;
+      const autoDy = y - (gyroLayout.cy + autoLayout.autoY);
+      if ((autoDx * autoDx + autoDy * autoDy) <= (autoLayout.autoR * autoLayout.autoR)) {
+        toggleGyroAuto();
+        return;
+      }
+      const gyroHit = hitTestGyro(x, y, gyroLayout);
+      if (gyroHit) {
+        const nowMs = performance.now();
+        if (gyroTapRef.current.ring === gyroHit.ring && (nowMs - gyroTapRef.current.time) < 280) {
+          gyroTapRef.current = { time: 0, ring: null };
+          setManualGyro(gyroHit.ring, 0);
+          return;
+        }
+        gyroTapRef.current = { time: nowMs, ring: gyroHit.ring };
+        gyroDragRef.current = { active: true, pointerId: e.pointerId, ring: gyroHit.ring };
+        setManualGyro(gyroHit.ring, gyroHit.value);
+        try { canvasRef.current.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        return;
+      }
 
       // hit test bubbles (topmost)
       const bubbles = bubblesRef.current;
@@ -294,6 +778,16 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       const rect = containerRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+      const gyroLayout = getGyroLayout(canvasRef.current.width, canvasRef.current.height);
+
+      if (gyroDragRef.current.active && gyroDragRef.current.pointerId === e.pointerId) {
+        const ring = gyroDragRef.current.ring;
+        if (ring) {
+          const angle = Math.atan2(y - gyroLayout.cy, x - gyroLayout.cx);
+          setManualGyro(ring, angleToValue(angle));
+        }
+        return;
+      }
 
       // dragging existing bubble
       if (grabRef.current.id && grabRef.current.pointerId === e.pointerId) {
@@ -346,6 +840,11 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
     const handlePointerUp = (e: React.PointerEvent) => {
       if (!canvasRef.current) return;
+      if (gyroDragRef.current.active && gyroDragRef.current.pointerId === e.pointerId) {
+        gyroDragRef.current = { active: false, pointerId: null, ring: null };
+        try { canvasRef.current.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+        return;
+      }
       if (grabRef.current.id && grabRef.current.pointerId === e.pointerId) {
         grabRef.current = { id: null, pointerId: null, offsetX: 0, offsetY: 0, lastX: 0, lastY: 0, lastT: performance.now() };
       }
@@ -400,9 +899,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.textBaseline = 'top';
 
       // Log Entries
-      ctx.fillStyle = 'rgba(200, 210, 205, 0.85)';
       let y = h - 20;
+      const total = logRef.current.length;
+      const alphaMax = 0.9;
+      const alphaMin = 0.05;
       for (let i = logRef.current.length - 1; i >= 0; i--) {
+        const idxFromBottom = logRef.current.length - 1 - i;
+        const t = total > 1 ? idxFromBottom / (total - 1) : 0;
+        const alpha = alphaMax - (alphaMax - alphaMin) * t;
+        ctx.fillStyle = `rgba(200, 210, 205, ${alpha.toFixed(3)})`;
         ctx.fillText(logRef.current[i], 15, y);
         y -= 12;
       }
@@ -420,6 +925,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
       const poolInfo = audioService.getActivePoolInfo();
       const poolLabel = poolInfo.labels.length ? poolInfo.labels.join('|') : '--';
+      const eqLow = Number.isFinite(audio.low) ? audio.low : 0;
+      const eqMid = Number.isFinite(audio.mid) ? audio.mid : 0;
+      const eqHigh = Number.isFinite(audio.high) ? audio.high : 0;
       const params = [
         `// PLAY_POOL`,
         `PLAY_CNT  : ${poolInfo.size}`,
@@ -440,6 +948,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         `ENTROPY   : ${phys.fragmentation.toFixed(3)}`,
         `// AUDIO_DSP`,
         `FREQ_OSC  : ${Math.round(audio.baseFrequency)}Hz`,
+        `EQ_LOW    : ${eqLow.toFixed(1)}dB`,
+        `EQ_MID    : ${eqMid.toFixed(1)}dB`,
+        `EQ_HIGH   : ${eqHigh.toFixed(1)}dB`,
         `PEAK_DB   : ${metrics.peakDb.toFixed(1)}dB`,
         `SCALE_MODE: ${scaleLabel}`,
         `VERB_MIX  : ${audio.reverbWet.toFixed(2)}`,
@@ -464,7 +975,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.restore();
     };
 
-    const drawAmoeba = (ctx: CanvasRenderingContext2D, b: BubbleExt, w: number, h: number, blurAmount: number, overlap: boolean) => {
+    const drawAmoeba = (ctx: CanvasRenderingContext2D, b: BubbleExt, w: number, h: number, blurAmount: number, overlap: boolean, nowMs: number) => {
       const scale = FOCAL_LENGTH / (FOCAL_LENGTH + b.z);
       const cx = w / 2; const cy = h / 2;
       const x2d = (b.x - cx) * scale + cx;
@@ -479,6 +990,56 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.translate(x2d, y2d);
       ctx.rotate(b.deformation.rotation);
       ctx.scale(b.deformation.scaleX, b.deformation.scaleY);
+
+      const drawDotText = (text: string, alpha: number, scaleFactor: number) => {
+        if (!text) return;
+        const glyphs = text.split('').map((ch) => DOT_FONT[ch]).filter(Boolean);
+        if (!glyphs.length) return;
+        const rows = glyphs[0].length;
+        const colsList = glyphs.map((g) => g[0]?.length ?? 0);
+        const gapCols = 1;
+        const totalCols = colsList.reduce((sum, v) => sum + v, 0) + gapCols * Math.max(0, glyphs.length - 1);
+        if (totalCols <= 0) return;
+
+        const cellBase = Math.min(r2d * 0.32, r2d / (rows + 2));
+        const maxWidth = r2d * 1.35 * scaleFactor;
+        const cell = Math.min(cellBase, maxWidth / totalCols);
+        const dotR = Math.max(0.6, cell * 0.42);
+        const halfH = ((rows - 1) * cell) / 2;
+        let cursorX = -((totalCols - 1) * cell) / 2;
+        const angleStep = (Math.PI * 2) / VERTEX_COUNT;
+
+        ctx.save();
+        ctx.globalAlpha = Math.min(0.9, alpha);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = Math.max(0.6, dotR * 0.2);
+        for (let gi = 0; gi < glyphs.length; gi++) {
+          const pattern = glyphs[gi];
+          const cols = colsList[gi];
+          for (let r = 0; r < pattern.length; r++) {
+            const row = pattern[r];
+            for (let c = 0; c < row.length; c++) {
+              if (row[c] !== '1') continue;
+              const dx = cursorX + c * cell;
+              const dy = -halfH + r * cell;
+              const angle = Math.atan2(dy, dx);
+              const vertexIndex = ((Math.round((angle + Math.PI) / angleStep) % VERTEX_COUNT) + VERTEX_COUNT) % VERTEX_COUNT;
+              const warp = b.vertices[vertexIndex] ?? 1;
+              const warpScale = 1 + (warp - 1) * 0.7;
+              const wx = dx * warpScale;
+              const wy = dy * warpScale;
+              const wr = dotR * (0.9 + (warp - 1) * 0.35);
+              ctx.beginPath();
+              ctx.arc(wx, wy, wr, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+            }
+          }
+          cursorX += (cols + gapCols) * cell;
+        }
+        ctx.restore();
+      };
 
       ctx.beginPath();
       const angleStep = (Math.PI * 2) / VERTEX_COUNT;
@@ -513,22 +1074,131 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.stroke();
       ctx.globalCompositeOperation = prevComp;
 
-      const now = performance.now();
-      if (b.labelText && b.labelUntil && now < b.labelUntil) {
+      const overlay = b.digitOverlay;
+      if (overlay && r2d >= DIGIT_OVERLAY_MIN_R2D) {
+        const remaining = overlay.until - nowMs;
+        if (remaining > 0) {
+          const age = nowMs - overlay.since;
+          const fade = DIGIT_OVERLAY_FADE_MS;
+          let alpha = 1;
+          if (age < fade) alpha = age / fade;
+          if (remaining < fade) alpha = Math.min(alpha, remaining / fade);
+          if (alpha > 0.05) drawDotText(overlay.digit, alpha * 0.9, 1);
+        }
+      }
+
+      if (!overlay && r2d >= DIGIT_OVERLAY_MIN_R2D) {
+        const label = getSourceLabel(b.audioSource ?? null);
+        const labelAlpha = b.labelAlpha ?? 0;
+        if (label && labelAlpha > 0.02) drawDotText(label, labelAlpha, 0.85);
+      }
+
+      ctx.restore();
+    };
+
+    const drawWallReflections = (ctx: CanvasRenderingContext2D, bubbles: BubbleExt[], w: number, h: number) => {
+      if (!bubbles.length) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+
+      const drawReflection = (ref: BubbleExt, alpha: number) => {
+        if (alpha <= 0) return;
+        const scale = FOCAL_LENGTH / (FOCAL_LENGTH + ref.z);
+        const cx = w / 2; const cy = h / 2;
+        const x2d = (ref.x - cx) * scale + cx;
+        const y2d = (ref.y - cy) * scale + cy;
+        const r2d = ref.radius * scale;
+        if (r2d < 2) return;
+
         ctx.save();
-        ctx.fillStyle = 'rgba(60, 70, 60, 0.65)';
-        ctx.font = `bold ${Math.max(10, Math.round(r2d * 0.6))}px "Courier New", monospace`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.globalAlpha = Math.max(0.5, 0.9 - depthT * 0.4);
-        ctx.fillText(b.labelText, 0, 0);
+        ctx.translate(x2d, y2d);
+        ctx.rotate(ref.deformation.rotation);
+        ctx.scale(ref.deformation.scaleX, ref.deformation.scaleY);
+
+        const depthT = Math.max(0, Math.min(1, ref.z / DEPTH));
+        ctx.globalAlpha = alpha * (0.75 - depthT * 0.35);
+        ctx.fillStyle = ref.color;
+        ctx.imageSmoothingEnabled = false;
+
+        const cell = Math.max(1.6, Math.min(4.5, r2d / 7));
+        const half = Math.max(1, Math.ceil(r2d / cell));
+        const angleStep = (Math.PI * 2) / VERTEX_COUNT;
+        for (let iy = -half; iy <= half; iy++) {
+          for (let ix = -half; ix <= half; ix++) {
+            const dx = ix * cell;
+            const dy = iy * cell;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > r2d * 1.35) continue;
+            const ang = Math.atan2(dy, dx);
+            const vertexIndex = ((Math.round((ang + Math.PI) / angleStep) % VERTEX_COUNT) + VERTEX_COUNT) % VERTEX_COUNT;
+            const warp = ref.vertices[vertexIndex] ?? 1;
+            const warpR = r2d * (1 + (warp - 1) * 0.65);
+            if (dist <= warpR) {
+              ctx.fillRect(dx - cell * 0.45, dy - cell * 0.45, cell * 0.9, cell * 0.9);
+            }
+          }
+        }
         ctx.restore();
-      } else if (b.radius > 40) {
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.font = '8px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(b.id, 0, 0);
+      };
+
+      for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        const depthFade = 1 - Math.min(1, b.z / DEPTH) * 0.6;
+        const dim = 0.75;
+        const baseAlpha = 0.05 * depthFade;
+
+        const distLeft = b.x - b.radius;
+        const distRight = (w - b.x) - b.radius;
+        const distTop = b.y - b.radius;
+        const distBottom = (h - b.y) - b.radius;
+        const distBack = (DEPTH - b.z) - b.radius;
+        const proxLeft = distLeft < REFLECT_RANGE ? clamp01((REFLECT_RANGE - Math.max(0, distLeft)) / REFLECT_RANGE) : 0;
+        const proxRight = distRight < REFLECT_RANGE ? clamp01((REFLECT_RANGE - Math.max(0, distRight)) / REFLECT_RANGE) : 0;
+        const proxTop = distTop < REFLECT_RANGE ? clamp01((REFLECT_RANGE - Math.max(0, distTop)) / REFLECT_RANGE) : 0;
+        const proxBottom = distBottom < REFLECT_RANGE ? clamp01((REFLECT_RANGE - Math.max(0, distBottom)) / REFLECT_RANGE) : 0;
+        const proxBack = distBack < REFLECT_BACK_RANGE ? clamp01((REFLECT_BACK_RANGE - Math.max(0, distBack)) / REFLECT_BACK_RANGE) : 0;
+
+        if (proxLeft > 0) {
+          const ref: BubbleExt = { ...b, x: -b.x, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + proxLeft * 0.22) * dim);
+        }
+
+        if (proxRight > 0) {
+          const ref: BubbleExt = { ...b, x: 2 * w - b.x, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + proxRight * 0.22) * dim);
+        }
+
+        if (proxTop > 0) {
+          const ref: BubbleExt = { ...b, y: -b.y, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + proxTop * 0.18) * dim);
+        }
+
+        if (proxBottom > 0) {
+          const ref: BubbleExt = { ...b, y: 2 * h - b.y, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + proxBottom * 0.18) * dim);
+        }
+
+        if (proxBack > 0) {
+          const ref: BubbleExt = { ...b, z: 2 * DEPTH - b.z, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + proxBack * 0.16) * dim);
+        }
+
+        if (proxLeft > 0 && proxTop > 0) {
+          const ref: BubbleExt = { ...b, x: -b.x, y: -b.y, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + (proxLeft * proxTop) * 0.2) * dim);
+        }
+        if (proxLeft > 0 && proxBottom > 0) {
+          const ref: BubbleExt = { ...b, x: -b.x, y: 2 * h - b.y, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + (proxLeft * proxBottom) * 0.2) * dim);
+        }
+        if (proxRight > 0 && proxTop > 0) {
+          const ref: BubbleExt = { ...b, x: 2 * w - b.x, y: -b.y, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + (proxRight * proxTop) * 0.2) * dim);
+        }
+        if (proxRight > 0 && proxBottom > 0) {
+          const ref: BubbleExt = { ...b, x: 2 * w - b.x, y: 2 * h - b.y, digitOverlay: undefined, audioSource: null, labelAlpha: 0, labelTargetAlpha: 0 };
+          drawReflection(ref, (baseAlpha + (proxRight * proxBottom) * 0.2) * dim);
+        }
       }
 
       ctx.restore();
@@ -601,13 +1271,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       });
 
       ctx.strokeStyle = 'rgba(185, 188, 183, 0.15)';
-      const gridSteps = 5;
-      for (let i = 0; i <= gridSteps; i++) {
-        const t = i / gridSteps;
-        const p1 = project(fBL.x + (fBR.x - fBL.x) * t, fBL.y + (fBR.y - fBL.y) * t, fBL.z);
-        const p2 = project(bBL.x + (bBR.x - bBL.x) * t, bBL.y + (bBR.y - bBL.y) * t, bBL.z);
-        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-      }
 
       ctx.strokeStyle = 'rgba(185, 188, 183, 0.4)';
       const pfTL = project(fTL.x, fTL.y, fTL.z); const pbTL = project(bTL.x, bTL.y, bTL.z);
@@ -623,6 +1286,54 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.beginPath();
       ctx.moveTo(pbTL.x, pbTL.y); ctx.lineTo(pbTR.x, pbTR.y); ctx.lineTo(pbBR.x, pbBR.y); ctx.lineTo(pbBL.x, pbBL.y);
       ctx.closePath(); ctx.stroke();
+
+      ctx.restore();
+    };
+
+    const drawVoid = (ctx: CanvasRenderingContext2D, w: number, h: number, strength: number, time: number) => {
+      if (strength <= 0.02) return;
+      const cx = w / 2;
+      const cy = h / 2;
+      const core = 18 + strength * 70;
+      const halo = core * 2.6;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalCompositeOperation = 'source-over';
+
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, halo);
+      grad.addColorStop(0, 'rgba(8,8,8,0.92)');
+      grad.addColorStop(0.35, 'rgba(20,20,20,0.55)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, halo, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.rotate(time * 0.15 + strength * 0.4);
+      ctx.strokeStyle = `rgba(120, 126, 118, ${0.12 + strength * 0.2})`;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 8]);
+      for (let i = 0; i < 3; i++) {
+        const r = core * (0.9 + i * 0.45);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.2, r * 0.75, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(-time * 0.25);
+      ctx.strokeStyle = `rgba(15, 15, 15, ${0.45 + strength * 0.2})`;
+      ctx.setLineDash([]);
+      for (let i = 0; i < 4; i++) {
+        const r = core * 0.6 + i * 6;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, time * 0.4 + i, time * 0.4 + i + Math.PI * 1.2);
+        ctx.stroke();
+      }
+      ctx.restore();
 
       ctx.restore();
     };
@@ -663,6 +1374,121 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.fillStyle = `rgba(46, 47, 43, ${alpha})`;
         ctx.fillText(info, mx, my - (fontSize * 0.6));
       });
+      ctx.restore();
+    };
+
+    const drawSpatialGyro = (ctx: CanvasRenderingContext2D, w: number, h: number, time: number) => {
+      const layout = getGyroLayout(w, h);
+      const { cx, cy, rings } = layout;
+      const state = gyroStateRef.current;
+      const activeRing = gyroDragRef.current.active ? gyroDragRef.current.ring : null;
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.9);
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.lineWidth = GYRO_THICKNESS;
+      ctx.lineCap = 'round';
+
+      rings.forEach((ring, idx) => {
+        const spin = time * (0.08 + idx * 0.04);
+        const baseAlpha = activeRing === ring.id ? 0.65 : 0.35;
+        ctx.save();
+        ctx.rotate(spin);
+        ctx.strokeStyle = `rgba(214, 222, 216, ${baseAlpha + pulse * 0.15})`;
+        ctx.setLineDash([8, 10]);
+        ctx.beginPath();
+        ctx.arc(0, 0, ring.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.setLineDash([]);
+        ctx.strokeStyle = `rgba(122, 132, 118, ${0.25 + pulse * 0.2})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, ring.r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        const value =
+          ring.id === 'pan' ? state.pan : ring.id === 'depth' ? state.depth : state.width;
+        const ang = valueToAngle(value);
+        const hx = Math.cos(ang) * ring.r;
+        const hy = Math.sin(ang) * ring.r;
+        ctx.fillStyle = `rgba(242, 242, 240, ${0.75 + pulse * 0.2})`;
+        ctx.strokeStyle = `rgba(122, 132, 118, ${0.7 + pulse * 0.2})`;
+        ctx.beginPath();
+        ctx.rect(hx - GYRO_HANDLE, hy - GYRO_HANDLE, GYRO_HANDLE * 2, GYRO_HANDLE * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      const stereo = audioService.getStereoLevels();
+      const meter = stereoRef.current;
+      const targetL = clamp01(stereo.left);
+      const targetR = clamp01(stereo.right);
+      meter.left += (targetL - meter.left) * 0.25;
+      meter.right += (targetR - meter.right) * 0.25;
+
+      const autoLayout = getGyroAutoLayout(layout);
+      const { circleR, circleGap, autoR, autoY } = autoLayout;
+      const barW = Math.max(2, circleR * 0.45);
+      const barMax = Math.max(4, circleR * 1.6);
+
+      const drawStereoCircle = (cx: number, level: number) => {
+        ctx.save();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = 'rgba(32, 34, 30, 0.45)';
+        ctx.strokeStyle = 'rgba(122, 132, 118, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, 0, circleR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, 0, circleR - 1, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(214, 222, 216, 0.9)';
+        const barH = barMax * level;
+        ctx.fillRect(cx - barW / 2, circleR - 2 - barH, barW, barH);
+        ctx.restore();
+        ctx.restore();
+      };
+
+      const stereoOffset = circleR + circleGap * 0.5;
+      drawStereoCircle(-stereoOffset, meter.left);
+      drawStereoCircle(stereoOffset, meter.right);
+
+      ctx.save();
+      const isAuto = gyroAutoRef.current.enabled;
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(32, 34, 30, 0.45)';
+      ctx.strokeStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(122, 132, 118, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, autoY, autoR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = isAuto ? 'rgba(46, 47, 43, 0.95)' : 'rgba(214, 222, 216, 0.75)';
+      ctx.font = '10px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(isAuto ? '-' : '|', 0, autoY + (isAuto ? 0.4 : 0));
+      ctx.restore();
+
+      ctx.font = '8px "Courier New", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(214, 222, 216, 0.7)';
+      const fmt = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+      const labelX = rings[rings.length - 1].r + 8;
+      let textY = -rings[rings.length - 1].r * 0.9;
+      ctx.fillText(`PAN   ${fmt(state.pan)}`, labelX, textY);
+      textY += 10;
+      ctx.fillText(`DEPTH ${fmt(state.depth)}`, labelX, textY);
+      textY += 10;
+      ctx.fillText(`WIDTH ${fmt(state.width)}`, labelX, textY);
+
       ctx.restore();
     };
 
@@ -766,7 +1592,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         if (hiddenOrThrottled) {
           fpsState.acc = 0;
           fpsState.frames = 0;
-          fpsState.fps = 60;
+          fpsState.fps = FPS_OK;
           perfRef.current.recovering = false;
           perfRef.current.lockUntilHighFps = false;
           requestRef.current = requestAnimationFrame(animate);
@@ -780,12 +1606,12 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
         // Performance guard: if FPS tanks below 30, enable shred + block budding until recovery to ~60
         const perf = perfRef.current;
-        if (fpsState.fps > 55) {
+        if (fpsState.fps > FPS_GUARD_GOOD) {
           perf.recovering = false;
           perf.lockUntilHighFps = false;
-        } else if (fpsState.fps > 30 && !perf.lockUntilHighFps) {
+        } else if (fpsState.fps > FPS_GUARD_OK && !perf.lockUntilHighFps) {
           perf.recovering = false;
-        } else if (fpsState.fps > 0 && fpsState.fps < 30) {
+        } else if (fpsState.fps > 0 && fpsState.fps < FPS_GUARD_RECOVER) {
           perf.recovering = true;
           perf.lockUntilHighFps = true;
         }
@@ -805,26 +1631,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         const audio = audioSettingsRef.current;
         const time = Date.now() * 0.002 * Math.max(0.1, phys.tempo || 0);
         const nowMs = performance.now();
+        updateGyroAuto(nowMs);
         const peakDb = audioService.getPeakLevel();
         const poolSize = audioService.getActivePoolSize();
-        if (labelRef.current.nextAt < nowMs) {
-          const shouldLabel = poolSize === 3 || poolSize === 6 || poolSize === 9;
-          if (shouldLabel) {
-            const candidates = bubblesRef.current.filter((b) => b.radius > 26);
-            if (candidates.length) {
-              const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-              chosen.labelText = String(poolSize);
-              chosen.labelUntil = nowMs + 3500 + Math.random() * 2500;
-            }
-          }
-          labelRef.current.nextAt = nowMs + 8000 + Math.random() * 12000;
+        if (digitRef.current.nextAt < nowMs) {
+          const shouldSpawn = poolSize === 3 || poolSize === 6 || poolSize === 9;
+          if (shouldSpawn) assignDigitOverlay(String(poolSize) as DigitChar, nowMs);
+          digitRef.current.nextAt = nowMs + 8000 + Math.random() * 12000;
         }
-        bubblesRef.current.forEach((b) => {
-          if (b.labelUntil && b.labelUntil < nowMs) {
-            b.labelUntil = undefined;
-            b.labelText = undefined;
-          }
-        });
+        const bankSnapshot = audioService.getBankSnapshot();
         drawMatrixLog(ctx, canvas.width, canvas.height, {
           peakDb,
           baseFreq: audio.baseFrequency,
@@ -832,22 +1647,42 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           fps: fpsRef.current.fps,
         });
         drawRoom(ctx, canvas.width, canvas.height, phys.geometryWarp, phys.roomWave, time);
+        drawVoid(ctx, canvas.width, canvas.height, phys.blackHole, time);
 
         const bubbles = bubblesRef.current;
+        const hasSources =
+          bankSnapshot.synthEnabled ||
+          bankSnapshot.mic.some(Boolean) ||
+          bankSnapshot.smp.some(Boolean);
+        if (hasSources) {
+          const unassigned = bubbles.filter((b) => !b.audioSource);
+          if (unassigned.length) {
+            unassigned.sort(() => Math.random() - 0.5);
+            unassigned.forEach((b) => {
+              const source = audioService.assignSourceToBubble();
+              if (!source) return;
+              b.audioSource = source;
+              b.labelAlpha = 0;
+              b.labelTargetAlpha = 0.6;
+            });
+          }
+        }
         const particles = particlesRef.current;
         const recovering = perfRef.current.recovering;
         const fpsNow = fpsRef.current.fps;
-        const severity = recovering ? Math.max(0, 30 - Math.max(0, fpsNow)) / 30 : 0;
+        const severity = recovering ? Math.max(0, FPS_GUARD_RECOVER - Math.max(0, fpsNow)) / FPS_GUARD_RECOVER : 0;
         let shredQuota = 0;
         if (recovering && bubbles.length > 0) {
           // Gradual decay: remove a small fraction per frame based on severity, capped
-          shredQuota = Math.max(1, Math.floor(bubbles.length * (0.02 + severity * 0.06)));
-          shredQuota = Math.min(shredQuota, Math.max(2, Math.floor(bubbles.length * 0.1)));
+          shredQuota = Math.max(1, Math.floor(bubbles.length * (0.01 + severity * 0.03)));
+          shredQuota = Math.min(shredQuota, Math.max(1, Math.floor(bubbles.length * 0.06)));
         }
 
         if (!isPlayingRef.current) {
           bubbles.sort((a, b) => b.z - a.z);
-          bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, 0, false));
+          drawWallReflections(ctx, bubbles, canvas.width, canvas.height);
+          bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, 0, false, nowMs));
+          drawSpatialGyro(ctx, canvas.width, canvas.height, time);
           requestRef.current = requestAnimationFrame(animate);
           return;
         }
@@ -879,6 +1714,23 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         // --- BUBBLE PHYSICS (local forces) ---
         for (let i = 0; i < bubbles.length; i++) {
           const b = bubbles[i];
+          if (b.audioSource && !isSourceValid(b.audioSource, bankSnapshot)) {
+            b.labelTargetAlpha = 0;
+          }
+          if (b.labelTargetAlpha === undefined) {
+            b.labelTargetAlpha = b.audioSource ? 0.6 : 0;
+          }
+          const labelTarget = b.labelTargetAlpha ?? 0;
+          const labelAlpha = b.labelAlpha ?? labelTarget;
+          b.labelAlpha = labelAlpha + (labelTarget - labelAlpha) * 0.08;
+          if (b.labelAlpha < 0.02 && labelTarget === 0) {
+            b.labelAlpha = 0;
+            b.audioSource = null;
+          }
+          if (b.digitImpactsLeft !== undefined && b.digitImpactsLeft <= 0) {
+            spawnPuff(b);
+            bubbles.splice(i, 1); i--; continue;
+          }
 
           // Freeze (Viscosity)
           if (freeze > 0) {
@@ -889,7 +1741,12 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           }
 
           // Auto shred if perf drops (gradual, not all at once)
-          if (recovering && shredQuota > 0 && Math.random() < (0.35 + severity * 0.35)) {
+          if (
+            recovering &&
+            shredQuota > 0 &&
+            (!b.spawnedAt || (nowMs - b.spawnedAt) > SHRED_GRACE_MS) &&
+            Math.random() < (0.25 + severity * 0.35)
+          ) {
             for (let k = 0; k < 32; k++) spawnParticle(b.x, b.y, b.z, b.color);
             pushLog(`FPS_SHRED: ${b.id}`);
             shredQuota -= 1;
@@ -1012,6 +1869,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           if (b.z < 0) { b.z = 0; b.vz *= -0.9; wallHit = true; }
           else if (b.z > DEPTH) { b.z = DEPTH; b.vz *= -0.9; wallHit = true; }
 
+          if (wallHit) registerDigitImpact(b, nowMs);
           if (wallHit && blackHole < 0.5) {
             if ((Math.abs(b.vx) + Math.abs(b.vy) + Math.abs(b.vz)) > 0.5) triggerBubbleSound(b, 'WALL');
           }
@@ -1055,8 +1913,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         }
 
         // --- MAGNETO (pairwise, symmetric, clamped) ---
-        if (Math.abs(magneto - 0.5) > 0.02) {
-          const magIntensity = (magneto - 0.5) * 2; // [-1..1]
+        const safeMagneto = Number.isFinite(magneto) ? magneto : 0.5;
+        if (Math.abs(safeMagneto - 0.5) > 0.01) {
+          const magIntensity = (safeMagneto - 0.5) * 2; // [-1..1]
           const magAbs = Math.abs(magIntensity);
 
           for (let i = 0; i < bubbles.length; i++) {
@@ -1075,7 +1934,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
               const nx = dx / dist; const ny = dy / dist; const nz = dz / dist;
 
               // base force scaled by distance and knob intensity
-              let baseForce = (200 * magAbs) / distSq;
+              let baseForce = (200 * MAGNETO_BOOST * magAbs) / distSq;
 
               // charge interaction preference (keep your "feel")
               const chargeFactor = b1.charge * b2.charge;
@@ -1092,7 +1951,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
               let force = baseForce * desire;
 
               // clamp accel per pair
-              const maxA = MAX_ACCEL * Math.max(0.2, tempo);
+              const maxA = MAX_ACCEL * Math.max(0.2, tempo) * (0.7 + magAbs * 1.6);
               if (force > maxA) force = maxA;
               if (force < -maxA) force = -maxA;
 
@@ -1160,6 +2019,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
                   applyJellyImpact(b2, nx, ny, impulse);
 
                   triggerBubbleSound(b1, 'COLLIDE');
+                  registerDigitImpact(b1, nowMs);
+                  registerDigitImpact(b2, nowMs);
                 }
               }
             }
@@ -1174,10 +2035,12 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
         // Draw
         bubbles.sort((a, b) => b.z - a.z);
-        bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, (b.z / DEPTH) * 6, overlapIds.has(b.id)));
+        drawWallReflections(ctx, bubbles, canvas.width, canvas.height);
+        bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, (b.z / DEPTH) * 6, overlapIds.has(b.id), nowMs));
 
         const topPairs = collisionPairs.sort((a, b) => a.dist - b.dist).slice(0, 3);
         drawHUD(ctx, topPairs, canvas.width, canvas.height);
+        drawSpatialGyro(ctx, canvas.width, canvas.height, time);
 
         requestRef.current = requestAnimationFrame(animate);
       };
