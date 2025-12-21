@@ -52,6 +52,8 @@ const GYRO_GAP = 5;
 const GYRO_HANDLE = 3.5;
 const MAGNETO_BOOST = 3.8;
 const SHRED_GRACE_MS = 1400;
+const SHRED_RECOVERY_DELAY_MS = 1200;
+const SHRED_MIN_BUBBLES = 6;
 const VOID_PLANE_Z = DEPTH * 0.95; // inner back wall plane for Void sink
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const BUBBLE_COLORS = [
@@ -299,7 +301,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
     const requestRef = useRef<number | null>(null);
     const isPlayingRef = useRef<boolean>(isPlaying);
     const fpsRef = useRef({ last: performance.now(), acc: 0, frames: 0, fps: 0 });
-    const perfRef = useRef({ recovering: false, lockUntilHighFps: false, recoverAboveMs: 0 });
+    const perfRef = useRef({ recovering: false, lockUntilHighFps: false, recoverAboveMs: 0, shredDelayUntil: 0 });
     const visibilityRef = useRef<boolean>(typeof document !== 'undefined' ? document.visibilityState === 'hidden' : false);
     const grabRef = useRef<{
       id: string | null;
@@ -1879,6 +1881,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           perfRef.current.recovering = false;
           perfRef.current.lockUntilHighFps = false;
           perfRef.current.recoverAboveMs = 0;
+          perfRef.current.shredDelayUntil = 0;
           requestRef.current = requestAnimationFrame(animate);
           return;
         }
@@ -1890,6 +1893,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
         // Performance guard: if FPS tanks below 30, enable shred + block budding until recovery to ~60
         const perf = perfRef.current;
+        const wasRecovering = perf.recovering;
         if (fpsState.fps > FPS_GUARD_GOOD) {
           perf.recovering = false;
           perf.lockUntilHighFps = false;
@@ -1912,6 +1916,12 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           } else {
             perf.recoverAboveMs = 0;
           }
+        }
+        if (!wasRecovering && perf.recovering) {
+          perf.shredDelayUntil = now + SHRED_RECOVERY_DELAY_MS;
+        }
+        if (!perf.recovering) {
+          perf.shredDelayUntil = 0;
         }
 
         ctx.globalCompositeOperation = 'source-over';
@@ -1975,10 +1985,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         const fpsNow = fpsRef.current.fps;
         const severity = recovering ? Math.max(0, FPS_GUARD_RECOVER - Math.max(0, fpsNow)) / FPS_GUARD_RECOVER : 0;
         let shredQuota = 0;
-        if (recovering && bubbles.length > 0) {
+        const shredReady = recovering && nowMs >= perfRef.current.shredDelayUntil;
+        const safeMin = Math.max(SHRED_MIN_BUBBLES, poolSize);
+        if (shredReady && bubbles.length > safeMin) {
           // Gradual decay: remove a small fraction per frame based on severity, capped
           shredQuota = Math.max(1, Math.floor(bubbles.length * (0.01 + severity * 0.03)));
           shredQuota = Math.min(shredQuota, Math.max(1, Math.floor(bubbles.length * 0.06)));
+          shredQuota = Math.min(shredQuota, bubbles.length - safeMin);
         }
 
         if (!isPlayingRef.current) {
@@ -2054,8 +2067,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
           // Auto shred if perf drops (gradual, not all at once)
           if (
-            recovering &&
+            shredReady &&
             shredQuota > 0 &&
+            bubbles.length > safeMin &&
             (!b.spawnedAt || (nowMs - b.spawnedAt) > SHRED_GRACE_MS) &&
             Math.random() < (0.25 + severity * 0.35)
           ) {
