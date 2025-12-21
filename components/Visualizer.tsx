@@ -25,8 +25,9 @@ const FPS_OK = FPS_TARGET * 0.5;
 const FPS_RECOVER = FPS_TARGET * 0.25;
 const FPS_GOOD = FPS_TARGET * 0.9;
 const FPS_GUARD_OK = 40;
-const FPS_GUARD_RECOVER = 30;
+const FPS_GUARD_RECOVER = 25;
 const FPS_GUARD_GOOD = 55;
+const FPS_GUARD_RELEASE_MS = 800;
 
 // ---- STABILITY GUARDS (no design change) ----
 const EPS = 1e-6;
@@ -49,7 +50,7 @@ const GYRO_RADIUS_MAX = 36;
 const GYRO_THICKNESS = 4;
 const GYRO_GAP = 5;
 const GYRO_HANDLE = 3.5;
-const MAGNETO_BOOST = 2.6;
+const MAGNETO_BOOST = 3.8;
 const SHRED_GRACE_MS = 1400;
 const VOID_PLANE_Z = DEPTH * 0.95; // inner back wall plane for Void sink
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -278,7 +279,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
     const requestRef = useRef<number | null>(null);
     const isPlayingRef = useRef<boolean>(isPlaying);
     const fpsRef = useRef({ last: performance.now(), acc: 0, frames: 0, fps: 0 });
-    const perfRef = useRef({ recovering: false, lockUntilHighFps: false });
+    const perfRef = useRef({ recovering: false, lockUntilHighFps: false, recoverAboveMs: 0 });
     const visibilityRef = useRef<boolean>(typeof document !== 'undefined' ? document.visibilityState === 'hidden' : false);
     const grabRef = useRef<{
       id: string | null;
@@ -1448,9 +1449,16 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.beginPath();
         ctx.arc(cx, 0, circleR - 1, 0, Math.PI * 2);
         ctx.clip();
-        ctx.fillStyle = 'rgba(214, 222, 216, 0.9)';
-        const barH = barMax * level;
-        ctx.fillRect(cx - barW / 2, circleR - 2 - barH, barW, barH);
+        ctx.fillStyle = 'rgba(214, 222, 216, 0.95)';
+        const barBoost = 1.2;
+        const barH = Math.min(barMax, barMax * level * barBoost);
+        const barTop = circleR - 2 - barH;
+        ctx.fillRect(cx - barW / 2, barTop, barW, barH);
+
+        const lineW = circleR * 2 + 2;
+        const lineH = Math.max(1, barW * 0.2);
+        ctx.fillStyle = 'rgba(214, 222, 216, 0.6)';
+        ctx.fillRect(cx - lineW / 2, barTop - lineH * 0.5, lineW, lineH);
         ctx.restore();
         ctx.restore();
       };
@@ -1459,22 +1467,54 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       drawStereoCircle(-stereoOffset, meter.left);
       drawStereoCircle(stereoOffset, meter.right);
 
-      ctx.save();
       const isAuto = gyroAutoRef.current.enabled;
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(32, 34, 30, 0.45)';
-      ctx.strokeStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(122, 132, 118, 0.45)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(0, autoY, autoR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = isAuto ? 'rgba(46, 47, 43, 0.95)' : 'rgba(214, 222, 216, 0.75)';
-      ctx.font = '10px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(isAuto ? '-' : '|', 0, autoY + (isAuto ? 0.4 : 0));
-      ctx.restore();
+      const lissajous = audioService.getStereoWaveform();
+      const drawAutoCircle = (y: number, alpha: number, showGlyph: boolean, showLissajous: boolean) => {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(32, 34, 30, 0.45)';
+        ctx.strokeStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(122, 132, 118, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, y, autoR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        if (showLissajous && lissajous) {
+          const left = lissajous.left;
+          const right = lissajous.right;
+          const step = Math.max(1, Math.floor(left.length / 90));
+          const radius = autoR - 2;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(0, y, autoR - 1, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.strokeStyle = isAuto ? 'rgba(40, 44, 40, 0.75)' : 'rgba(214, 222, 216, 0.7)';
+          ctx.lineWidth = 0.9;
+          ctx.beginPath();
+          for (let i = 0; i < left.length; i += step) {
+            const lx = left[i] || 0;
+            const ry = right[i] || 0;
+            const boost = 1.45;
+            const px = lx * radius * boost;
+            const py = ry * radius * boost + y;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+        if (showGlyph) {
+          ctx.fillStyle = isAuto ? 'rgba(46, 47, 43, 0.95)' : 'rgba(214, 222, 216, 0.75)';
+          ctx.font = isAuto ? '10px "Courier New", monospace' : 'bold 12px "Courier New", monospace';
+          ctx.fillText(isAuto ? '\u2013' : '.', 0, y + (isAuto ? 0.4 : -0.2));
+        }
+        ctx.restore();
+      };
+
+      drawAutoCircle(-autoY, 0.55, false, true);
+      drawAutoCircle(autoY, 0.9, true, false);
 
       ctx.font = '8px "Courier New", monospace';
       ctx.textAlign = 'left';
@@ -1595,6 +1635,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           fpsState.fps = FPS_OK;
           perfRef.current.recovering = false;
           perfRef.current.lockUntilHighFps = false;
+          perfRef.current.recoverAboveMs = 0;
           requestRef.current = requestAnimationFrame(animate);
           return;
         }
@@ -1609,11 +1650,25 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         if (fpsState.fps > FPS_GUARD_GOOD) {
           perf.recovering = false;
           perf.lockUntilHighFps = false;
+          perf.recoverAboveMs = 0;
         } else if (fpsState.fps > FPS_GUARD_OK && !perf.lockUntilHighFps) {
           perf.recovering = false;
+          perf.recoverAboveMs = 0;
         } else if (fpsState.fps > 0 && fpsState.fps < FPS_GUARD_RECOVER) {
           perf.recovering = true;
           perf.lockUntilHighFps = true;
+          perf.recoverAboveMs = 0;
+        } else if (perf.lockUntilHighFps) {
+          if (fpsState.fps >= FPS_GUARD_RECOVER) {
+            perf.recoverAboveMs += dt;
+            if (perf.recoverAboveMs >= FPS_GUARD_RELEASE_MS) {
+              perf.recovering = false;
+              perf.lockUntilHighFps = false;
+              perf.recoverAboveMs = 0;
+            }
+          } else {
+            perf.recoverAboveMs = 0;
+          }
         }
 
         ctx.globalCompositeOperation = 'source-over';
@@ -1951,7 +2006,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
               let force = baseForce * desire;
 
               // clamp accel per pair
-              const maxA = MAX_ACCEL * Math.max(0.2, tempo) * (0.7 + magAbs * 1.6);
+              const maxA = MAX_ACCEL * Math.max(0.2, tempo) * (0.9 + magAbs * 2.2);
               if (force > maxA) force = maxA;
               if (force < -maxA) force = -maxA;
 

@@ -395,6 +395,20 @@ class AudioEngine {
     return { left: left.level, right: right.level };
   }
 
+  public getStereoWaveform(): { left: Float32Array; right: Float32Array } | null {
+    if (!this.stereoAnalyserL || !this.stereoAnalyserR) return null;
+    const size = this.stereoAnalyserL.fftSize;
+    if (!this.stereoBufferL || this.stereoBufferL.length !== size) {
+      this.stereoBufferL = new Float32Array(size);
+    }
+    if (!this.stereoBufferR || this.stereoBufferR.length !== size) {
+      this.stereoBufferR = new Float32Array(size);
+    }
+    this.stereoAnalyserL.getFloatTimeDomainData(this.stereoBufferL);
+    this.stereoAnalyserR.getFloatTimeDomainData(this.stereoBufferR);
+    return { left: this.stereoBufferL, right: this.stereoBufferR };
+  }
+
   public async resume(): Promise<void> {
     if (!this.ctx) await this.init();
     if (!this.ctx) return;
@@ -1318,7 +1332,15 @@ class AudioEngine {
 
     if (sampleBuffer) {
         const source = this.ctx.createBufferSource();
-        const bufferToUse = isReverse ? this.createReverseBuffer(sampleBuffer) : sampleBuffer;
+        let bufferToUse = sampleBuffer;
+        if (isReverse) {
+          const minFreq = 110;
+          const maxFreq = 880;
+          const tuningNorm = clamp((safeBaseFreq - minFreq) / (maxFreq - minFreq), 0, 1);
+          const sliceFrac = 0.2 + tuningNorm * 0.8;
+          const sliceSeconds = Math.max(0.15, Math.min(sampleBuffer.duration, sampleBuffer.duration * sliceFrac));
+          bufferToUse = this.createReverseSlice(sampleBuffer, sliceSeconds);
+        }
         source.buffer = bufferToUse;
         let rate = finalFreq / 440; 
         if (!Number.isFinite(rate)) rate = 1.0;
@@ -1386,6 +1408,21 @@ class AudioEngine {
           const src = buffer.getChannelData(i);
           for (let j = 0; j < src.length; j++) {
               dest[j] = src[src.length - 1 - j];
+          }
+      }
+      return revBuffer;
+  }
+
+  private createReverseSlice(buffer: AudioBuffer, sliceSeconds: number): AudioBuffer {
+      if (!this.ctx) return buffer;
+      const sliceSamples = Math.max(1, Math.min(buffer.length, Math.floor(sliceSeconds * buffer.sampleRate)));
+      const start = Math.max(0, buffer.length - sliceSamples);
+      const revBuffer = this.ctx.createBuffer(buffer.numberOfChannels, sliceSamples, buffer.sampleRate);
+      for (let i = 0; i < buffer.numberOfChannels; i++) {
+          const dest = revBuffer.getChannelData(i);
+          const src = buffer.getChannelData(i);
+          for (let j = 0; j < sliceSamples; j++) {
+              dest[j] = src[start + sliceSamples - 1 - j];
           }
       }
       return revBuffer;

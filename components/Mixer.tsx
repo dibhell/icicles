@@ -597,11 +597,13 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
             <Book size={14} />
             <span className="sr-only">Data</span>
           </div>
-          <div className="flex flex-col items-center gap-[4px]" style={{ height: CONTROL_ZONE_H }}>
-            <div className="w-[230px] min-w-[230px] max-w-[230px] shrink-0 px-1 py-0.5 bg-[#F2F2F0] border border-[#B9BCB7] rounded-full shadow-inner text-[9px] uppercase tracking-widest text-[#5F665F] flex items-center gap-2 overflow-hidden">
-              <Database size={12} className="opacity-80" />
-              <div ref={loadedWrapRef} className="flex-1 min-w-0 overflow-hidden whitespace-nowrap leading-none">
-                <span ref={loadedTextRef} className="inline-block pr-2" style={marqueeStyle}>{loadedSummary}</span>
+          <div className="flex flex-col items-start gap-[4px]" style={{ height: CONTROL_ZONE_H }}>
+            <div className="w-full max-w-[260px]">
+              <div className="w-[240px] min-w-[240px] max-w-[240px] shrink-0 px-1 py-0.5 bg-[#F2F2F0] border border-[#B9BCB7] rounded-full shadow-inner text-[9px] uppercase tracking-widest text-[#5F665F] flex items-center gap-2 overflow-hidden">
+                <Database size={12} className="opacity-80" />
+                <div ref={loadedWrapRef} className="flex-1 min-w-0 overflow-hidden whitespace-nowrap leading-none">
+                  <span ref={loadedTextRef} className="inline-block pr-2" style={marqueeStyle}>{loadedSummary}</span>
+                </div>
               </div>
             </div>
 
