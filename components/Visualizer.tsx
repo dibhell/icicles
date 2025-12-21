@@ -264,6 +264,26 @@ type BubbleExt = Bubble & {
   labelAlpha?: number;
   labelTargetAlpha?: number;
   spawnedAt?: number;
+  overlapFrame?: number;
+};
+
+type Vec2 = { x: number; y: number };
+type Vec3 = { x: number; y: number; z: number };
+type RoomCache = {
+  w: number;
+  h: number;
+  frontBase: Vec3[];
+  backBase: Vec3[];
+  front: Vec3[];
+  back: Vec3[];
+  frontProj: Vec2[];
+  backProj: Vec2[];
+};
+type DotTextLayout = {
+  glyphs: string[][];
+  rows: number;
+  colsList: number[];
+  totalCols: number;
 };
 
 export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
@@ -327,6 +347,31 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
     // Matrix Log Buffer
     const logRef = useRef<string[]>([]);
+    const particlePoolRef = useRef<Particle[]>([]);
+    const bubblePoolRef = useRef<BubbleExt[]>([]);
+    const frameIdRef = useRef(0);
+    const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+    const backgroundRef = useRef<{ canvas: HTMLCanvasElement | null; w: number; h: number }>({
+      canvas: null,
+      w: 0,
+      h: 0,
+    });
+    const voidCacheRef = useRef<{ canvas: HTMLCanvasElement | null; w: number; h: number; strength: number }>({
+      canvas: null,
+      w: 0,
+      h: 0,
+      strength: -1,
+    });
+    const roomCacheRef = useRef<RoomCache | null>(null);
+    const dotTextCacheRef = useRef<Map<string, DotTextLayout>>(new Map());
+    const amoebaPointsRef = useRef<Vec2[]>(
+      Array.from({ length: VERTEX_COUNT }, () => ({ x: 0, y: 0 }))
+    );
+    const topPairsRef = useRef<{ b1: BubbleExt | null; b2: BubbleExt | null; dist: number }[]>([
+      { b1: null, b2: null, dist: Infinity },
+      { b1: null, b2: null, dist: Infinity },
+      { b1: null, b2: null, dist: Infinity },
+    ]);
 
     // Drawing State
     const isDrawingRef = useRef(false);
@@ -344,6 +389,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
     useImperativeHandle(ref, () => ({
       reset: () => {
+        bubblesRef.current.forEach(releaseBubble);
+        particlesRef.current.forEach(releaseParticle);
         bubblesRef.current = [];
         particlesRef.current = [];
         logRef.current = [];
@@ -352,6 +399,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         gyroAutoRef.current.enabled = false;
         gyroAutoRef.current.blend = 0;
         gyroHintRef.current.until = 0;
+        frameIdRef.current = 0;
         audioService.setSpatialControl(0, 0, 0);
       },
     }));
@@ -361,6 +409,194 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       const line = `[${ts}] ${msg}`;
       logRef.current.push(line);
       if (logRef.current.length > 16) logRef.current.shift();
+    };
+
+    const resetCachesForSize = () => {
+      backgroundRef.current.w = 0;
+      backgroundRef.current.h = 0;
+      voidCacheRef.current.w = 0;
+      voidCacheRef.current.h = 0;
+      roomCacheRef.current = null;
+    };
+
+    const getCanvasContext = (canvas: HTMLCanvasElement) => {
+      let ctx = ctxRef.current;
+      if (!ctx || ctx.canvas !== canvas) {
+        ctx = canvas.getContext('2d', { alpha: false });
+        ctxRef.current = ctx;
+      }
+      return ctx;
+    };
+
+    const ensureBackground = (w: number, h: number) => {
+      const cache = backgroundRef.current;
+      if (!cache.canvas && typeof document !== 'undefined') {
+        cache.canvas = document.createElement('canvas');
+      }
+      if (!cache.canvas) return null;
+      if (cache.w !== w || cache.h !== h) {
+        cache.canvas.width = w;
+        cache.canvas.height = h;
+        const bctx = cache.canvas.getContext('2d', { alpha: false });
+        if (!bctx) return null;
+        bctx.clearRect(0, 0, w, h);
+        bctx.fillStyle = '#2E2F2B';
+        bctx.fillRect(0, 0, w, h);
+        const gradientBack = bctx.createLinearGradient(0, 0, 0, h);
+        gradientBack.addColorStop(0, '#2E2F2B');
+        gradientBack.addColorStop(1, '#3F453F');
+        bctx.fillStyle = gradientBack;
+        bctx.fillRect(0, 0, w, h);
+        cache.w = w;
+        cache.h = h;
+      }
+      return cache.canvas;
+    };
+
+    const ensureVoidGradient = (w: number, h: number, strength: number) => {
+      if (strength <= 0.02) return null;
+      const cache = voidCacheRef.current;
+      if (!cache.canvas && typeof document !== 'undefined') {
+        cache.canvas = document.createElement('canvas');
+      }
+      if (!cache.canvas) return null;
+      if (cache.w !== w || cache.h !== h || cache.strength !== strength) {
+        cache.canvas.width = w;
+        cache.canvas.height = h;
+        const vctx = cache.canvas.getContext('2d');
+        if (!vctx) return null;
+        vctx.clearRect(0, 0, w, h);
+        const cx = w / 2;
+        const cy = h / 2;
+        const core = 18 + strength * 70;
+        const halo = core * 2.6;
+        vctx.save();
+        vctx.translate(cx, cy);
+        vctx.globalCompositeOperation = 'source-over';
+        const grad = vctx.createRadialGradient(0, 0, 0, 0, 0, halo);
+        grad.addColorStop(0, 'rgba(8,8,8,0.92)');
+        grad.addColorStop(0.35, 'rgba(20,20,20,0.55)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        vctx.fillStyle = grad;
+        vctx.beginPath();
+        vctx.arc(0, 0, halo, 0, Math.PI * 2);
+        vctx.fill();
+        vctx.restore();
+        cache.w = w;
+        cache.h = h;
+        cache.strength = strength;
+      }
+      return cache.canvas;
+    };
+
+    const ensureRoomCache = (w: number, h: number): RoomCache => {
+      let cache = roomCacheRef.current;
+      if (!cache || cache.w !== w || cache.h !== h) {
+        const frontBase = [
+          { x: 0, y: 0, z: 0 },
+          { x: w, y: 0, z: 0 },
+          { x: w, y: h, z: 0 },
+          { x: 0, y: h, z: 0 },
+        ];
+        const backBase = [
+          { x: -w * 0.1, y: -h * 0.1, z: DEPTH },
+          { x: w * 1.2, y: -h * 0.05, z: DEPTH * 0.9 },
+          { x: w * 0.9, y: h * 1.1, z: DEPTH },
+          { x: -w * 0.05, y: h * 1.05, z: DEPTH * 1.1 },
+        ];
+        const front = frontBase.map(p => ({ ...p }));
+        const back = backBase.map(p => ({ ...p }));
+        const frontProj = frontBase.map(() => ({ x: 0, y: 0 }));
+        const backProj = backBase.map(() => ({ x: 0, y: 0 }));
+        cache = { w, h, frontBase, backBase, front, back, frontProj, backProj };
+        roomCacheRef.current = cache;
+      }
+      return cache;
+    };
+
+    const getDotTextLayout = (text: string): DotTextLayout | null => {
+      if (!text) return null;
+      const cache = dotTextCacheRef.current;
+      const cached = cache.get(text);
+      if (cached) return cached;
+      const glyphs = text.split('').map(ch => DOT_FONT[ch]).filter(Boolean);
+      if (!glyphs.length) return null;
+      const rows = glyphs[0].length;
+      const colsList = glyphs.map(g => g[0]?.length ?? 0);
+      const gapCols = 1;
+      const totalCols = colsList.reduce((sum, v) => sum + v, 0) + gapCols * Math.max(0, glyphs.length - 1);
+      const layout = { glyphs, rows, colsList, totalCols };
+      cache.set(text, layout);
+      return layout;
+    };
+
+    const acquireParticle = () => {
+      return particlePoolRef.current.pop() || {
+        x: 0, y: 0, z: 0,
+        vx: 0, vy: 0, vz: 0,
+        life: 0,
+        color: '',
+        size: 0,
+      };
+    };
+
+    const releaseParticle = (p: Particle) => {
+      particlePoolRef.current.push(p);
+    };
+
+    const resetJelly = (jelly: JellyState) => {
+      jelly.sx = 1; jelly.sy = 1; jelly.rot = 0;
+      jelly.vsx = 0; jelly.vsy = 0; jelly.vrot = 0;
+      jelly.nx2 = 1; jelly.ny2 = 0;
+      if (jelly.vOff.length !== VERTEX_COUNT) jelly.vOff = new Array(VERTEX_COUNT).fill(0);
+      if (jelly.vVel.length !== VERTEX_COUNT) jelly.vVel = new Array(VERTEX_COUNT).fill(0);
+      for (let i = 0; i < VERTEX_COUNT; i++) {
+        jelly.vOff[i] = 0;
+        jelly.vVel[i] = 0;
+      }
+    };
+
+    const acquireBubble = (): BubbleExt => {
+      const b = bubblePoolRef.current.pop();
+      if (b) return b;
+      return {
+        id: '',
+        x: 0, y: 0, z: 0,
+        vx: 0, vy: 0, vz: 0,
+        radius: 0,
+        color: '',
+        hue: 0,
+        charge: 1,
+        vertices: new Array(VERTEX_COUNT).fill(1),
+        vertexPhases: new Array(VERTEX_COUNT).fill(0),
+        deformation: { scaleX: 1, scaleY: 1, rotation: 0 },
+      };
+    };
+
+    const releaseBubble = (b: BubbleExt) => {
+      b.audioSource = null;
+      b.digitOverlay = undefined;
+      b.digitImpactsLeft = undefined;
+      b.lastDigitImpactAt = undefined;
+      b.voidEnteredAt = undefined;
+      b.voidGraceMs = undefined;
+      b.labelAlpha = undefined;
+      b.labelTargetAlpha = undefined;
+      b.spawnedAt = undefined;
+      b.overlapFrame = undefined;
+      bubblePoolRef.current.push(b);
+    };
+
+    const removeBubbleAt = (bubbles: BubbleExt[], index: number) => {
+      const removed = bubbles[index];
+      const last = bubbles.pop();
+      if (last && last !== removed) {
+        bubbles[index] = last;
+        releaseBubble(removed);
+        return true;
+      }
+      if (removed) releaseBubble(removed);
+      return false;
     };
 
     const clampSigned = (v: number) => Math.max(-1, Math.min(1, v));
@@ -551,72 +787,87 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
     };
 
     const spawnParticle = (x: number, y: number, z: number, color: string) => {
-      particlesRef.current.push({
-        x, y, z,
-        vx: (Math.random() - 0.5) * 15,
-        vy: (Math.random() - 0.5) * 15,
-        vz: (Math.random() - 0.5) * 15,
-        life: 1.0,
-        color,
-        size: Math.random() * 2 + 0.5,
-      });
+      const p = acquireParticle();
+      p.x = x; p.y = y; p.z = z;
+      p.vx = (Math.random() - 0.5) * 15;
+      p.vy = (Math.random() - 0.5) * 15;
+      p.vz = (Math.random() - 0.5) * 15;
+      p.life = 1.0;
+      p.color = color;
+      p.size = Math.random() * 2 + 0.5;
+      particlesRef.current.push(p);
     };
 
     const spawnPuff = (b: BubbleExt) => {
       for (let i = 0; i < PUFF_PARTICLES; i++) {
-        particlesRef.current.push({
-          x: b.x,
-          y: b.y,
-          z: b.z,
-          vx: (Math.random() - 0.5) * PUFF_VELOCITY,
-          vy: (Math.random() - 0.5) * PUFF_VELOCITY,
-          vz: (Math.random() - 0.5) * (PUFF_VELOCITY * 0.6),
-          life: 0.6,
-          color: b.color,
-          size: Math.random() * 1.6 + 0.4,
-        });
+        const p = acquireParticle();
+        p.x = b.x;
+        p.y = b.y;
+        p.z = b.z;
+        p.vx = (Math.random() - 0.5) * PUFF_VELOCITY;
+        p.vy = (Math.random() - 0.5) * PUFF_VELOCITY;
+        p.vz = (Math.random() - 0.5) * (PUFF_VELOCITY * 0.6);
+        p.life = 0.6;
+        p.color = b.color;
+        p.size = Math.random() * 1.6 + 0.4;
+        particlesRef.current.push(p);
       }
     };
 
     const spawnBubble = (x: number, y: number, z: number = 0, r?: number) => {
       const color = BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)];
       const radius = r || Math.random() * 35 + 15;
-      const jelly: JellyState = {
+      const b = acquireBubble();
+      const vertices = b.vertices.length === VERTEX_COUNT ? b.vertices : new Array(VERTEX_COUNT).fill(1);
+      const vertexPhases = b.vertexPhases.length === VERTEX_COUNT ? b.vertexPhases : new Array(VERTEX_COUNT).fill(0);
+      for (let i = 0; i < VERTEX_COUNT; i++) {
+        vertices[i] = 1;
+        vertexPhases[i] = Math.random() * Math.PI * 2;
+      }
+      b.vertices = vertices;
+      b.vertexPhases = vertexPhases;
+      const jelly = b.jelly ?? {
         sx: 1, sy: 1, rot: 0,
         vsx: 0, vsy: 0, vrot: 0,
         vOff: new Array(VERTEX_COUNT).fill(0),
         vVel: new Array(VERTEX_COUNT).fill(0),
         nx2: 1, ny2: 0,
       };
-
-      const vertices = new Array(VERTEX_COUNT).fill(1);
-      const vertexPhases = new Array(VERTEX_COUNT).fill(0).map(() => Math.random() * Math.PI * 2);
+      resetJelly(jelly);
       const charge = Math.random() > 0.5 ? 1 : -1;
       const id = uuidv4().substring(0, 6).toUpperCase();
 
       const audioSource = audioService.assignSourceToBubble();
       const hasLabel = Boolean(audioSource);
       const spawnedAt = performance.now();
-      bubblesRef.current.push({
-        id,
-        x, y, z: z || Math.random() * (DEPTH * 0.5),
-        vx: (Math.random() - 0.5) * 2,
-        vy: (Math.random() - 0.5) * 2,
-        vz: (Math.random() - 0.5) * 2,
-        radius,
-        color,
-        hue: 0,
-        charge,
-        vertices,
-        vertexPhases,
-        deformation: { scaleX: 1, scaleY: 1, rotation: 0 },
-        jelly,
-        lastAudioAt: 0,
-        audioSource,
-        labelAlpha: hasLabel ? 0.6 : 0,
-        labelTargetAlpha: hasLabel ? 0.6 : 0,
-        spawnedAt,
-      });
+      b.id = id;
+      b.x = x;
+      b.y = y;
+      b.z = z || Math.random() * (DEPTH * 0.5);
+      b.vx = (Math.random() - 0.5) * 2;
+      b.vy = (Math.random() - 0.5) * 2;
+      b.vz = (Math.random() - 0.5) * 2;
+      b.radius = radius;
+      b.color = color;
+      b.hue = 0;
+      b.charge = charge;
+      if (!b.deformation) b.deformation = { scaleX: 1, scaleY: 1, rotation: 0 };
+      b.deformation.scaleX = 1;
+      b.deformation.scaleY = 1;
+      b.deformation.rotation = 0;
+      b.jelly = jelly;
+      b.lastAudioAt = 0;
+      b.audioSource = audioSource;
+      b.digitOverlay = undefined;
+      b.digitImpactsLeft = undefined;
+      b.lastDigitImpactAt = undefined;
+      b.voidEnteredAt = undefined;
+      b.voidGraceMs = undefined;
+      b.overlapFrame = undefined;
+      b.labelAlpha = hasLabel ? 0.6 : 0;
+      b.labelTargetAlpha = hasLabel ? 0.6 : 0;
+      b.spawnedAt = spawnedAt;
+      bubblesRef.current.push(b);
 
       pushLog(`SPAWN: ${id} <R:${Math.round(radius)}>`);
     };
@@ -993,13 +1244,10 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.scale(b.deformation.scaleX, b.deformation.scaleY);
 
       const drawDotText = (text: string, alpha: number, scaleFactor: number) => {
-        if (!text) return;
-        const glyphs = text.split('').map((ch) => DOT_FONT[ch]).filter(Boolean);
-        if (!glyphs.length) return;
-        const rows = glyphs[0].length;
-        const colsList = glyphs.map((g) => g[0]?.length ?? 0);
+        const layout = getDotTextLayout(text);
+        if (!layout) return;
+        const { glyphs, rows, colsList, totalCols } = layout;
         const gapCols = 1;
-        const totalCols = colsList.reduce((sum, v) => sum + v, 0) + gapCols * Math.max(0, glyphs.length - 1);
         if (totalCols <= 0) return;
 
         const cellBase = Math.min(r2d * 0.32, r2d / (rows + 2));
@@ -1044,21 +1292,26 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
       ctx.beginPath();
       const angleStep = (Math.PI * 2) / VERTEX_COUNT;
-      const points: { x: number; y: number }[] = [];
+      const points = amoebaPointsRef.current;
       for (let i = 0; i < VERTEX_COUNT; i++) {
         const r = r2d * b.vertices[i];
         const a = i * angleStep;
-        points.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+        const p = points[i];
+        p.x = Math.cos(a) * r;
+        p.y = Math.sin(a) * r;
       }
 
-      const mid = (p1: any, p2: any) => ({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 });
-      const start = mid(points[points.length - 1], points[0]);
-      ctx.moveTo(start.x, start.y);
+      const last = points[points.length - 1];
+      const first = points[0];
+      const startX = (last.x + first.x) / 2;
+      const startY = (last.y + first.y) / 2;
+      ctx.moveTo(startX, startY);
       for (let i = 0; i < points.length; i++) {
         const p1 = points[i];
         const p2 = points[(i + 1) % points.length];
-        const m = mid(p1, p2);
-        ctx.quadraticCurveTo(p1.x, p1.y, m.x, m.y);
+        const mx = (p1.x + p2.x) / 2;
+        const my = (p1.y + p2.y) / 2;
+        ctx.quadraticCurveTo(p1.x, p1.y, mx, my);
       }
       ctx.closePath();
 
@@ -1211,12 +1464,22 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.lineWidth = 0.5;
       ctx.setLineDash([]);
 
-      const project = (x: number, y: number, z: number) => {
-        const scale = FOCAL_LENGTH / (FOCAL_LENGTH + z);
-        return {
-          x: (x - w / 2) * scale + w / 2,
-          y: (y - h / 2) * scale + h / 2,
-        };
+      const cache = ensureRoomCache(w, h);
+      const { frontBase, backBase, front, back, frontProj, backProj } = cache;
+      for (let i = 0; i < front.length; i++) {
+        front[i].x = frontBase[i].x;
+        front[i].y = frontBase[i].y;
+        front[i].z = frontBase[i].z;
+        back[i].x = backBase[i].x;
+        back[i].y = backBase[i].y;
+        back[i].z = backBase[i].z;
+      }
+
+      const project = (p: Vec3, out: Vec2) => {
+        const scale = FOCAL_LENGTH / (FOCAL_LENGTH + p.z);
+        out.x = (p.x - w / 2) * scale + w / 2;
+        out.y = (p.y - h / 2) * scale + h / 2;
+        return out;
       };
 
       const warpAmt = warp * 0.35;
@@ -1224,38 +1487,23 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       const waveAmt = waveScale * 0.25;
       const wavePhase = time * 0.6;
 
-      const warpOffset = (ix: number, iy: number, iz: number) => {
+      const warpOffset = (ix: number, iy: number, iz: number, out: Vec3) => {
         const dx = (Math.sin(wavePhase + ix * 0.5 + iy * 0.3) + 1) * 0.5;
         const dy = (Math.cos(wavePhase * 0.7 + ix * 0.2 + iy * 0.6) + 1) * 0.5;
-        return {
-          x: (dx - 0.5) * warpAmt * w,
-          y: (dy - 0.5) * warpAmt * h,
-          z: (Math.sin(wavePhase + iz) + 1) * 0.5 * warpAmt * DEPTH * 0.3,
-        };
+        out.x = (dx - 0.5) * warpAmt * w;
+        out.y = (dy - 0.5) * warpAmt * h;
+        out.z = (Math.sin(wavePhase + iz) + 1) * 0.5 * warpAmt * DEPTH * 0.3;
       };
 
-      const baseFront = [
-        { x: 0, y: 0, z: 0 },
-        { x: w, y: 0, z: 0 },
-        { x: w, y: h, z: 0 },
-        { x: 0, y: h, z: 0 },
-      ];
-      const baseBack = [
-        { x: -w * 0.1, y: -h * 0.1, z: DEPTH },
-        { x: w * 1.2, y: -h * 0.05, z: DEPTH * 0.9 },
-        { x: w * 0.9, y: h * 1.1, z: DEPTH },
-        { x: -w * 0.05, y: h * 1.05, z: DEPTH * 1.1 },
-      ];
+      const fTL = front[0];
+      const fTR = front[1];
+      const fBR = front[2];
+      const fBL = front[3];
 
-      const fTL = baseFront[0];
-      const fTR = baseFront[1];
-      const fBR = baseFront[2];
-      const fBL = baseFront[3];
-
-      const bTL = baseBack[0];
-      const bTR = baseBack[1];
-      const bBR = baseBack[2];
-      const bBL = baseBack[3];
+      const bTL = back[0];
+      const bTR = back[1];
+      const bBR = back[2];
+      const bBL = back[3];
 
       [fTL, fTR, fBR, fBL].forEach((p, idx) => {
         const wv = wave > 0 ? waveAmt * Math.sin(wavePhase + idx * 0.6) : 0;
@@ -1263,8 +1511,9 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         p.y += (idx === 0 ? -1 : idx === 3 ? 1 : 0) * warpAmt * h * 0.15;
         p.z += wv * DEPTH * 0.1;
       });
+      const offs: Vec3 = { x: 0, y: 0, z: 0 };
       [bTL, bTR, bBR, bBL].forEach((p, idx) => {
-        const offs = warpOffset(idx, idx * 0.3, idx * 0.5);
+        warpOffset(idx, idx * 0.3, idx * 0.5, offs);
         const wv = wave > 0 ? waveAmt * Math.sin(wavePhase + idx * 0.8 + 1.2) : 0;
         p.x += offs.x;
         p.y += offs.y;
@@ -1274,10 +1523,10 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.strokeStyle = 'rgba(185, 188, 183, 0.15)';
 
       ctx.strokeStyle = 'rgba(185, 188, 183, 0.4)';
-      const pfTL = project(fTL.x, fTL.y, fTL.z); const pbTL = project(bTL.x, bTL.y, bTL.z);
-      const pfTR = project(fTR.x, fTR.y, fTR.z); const pbTR = project(bTR.x, bTR.y, bTR.z);
-      const pfBR = project(fBR.x, fBR.y, fBR.z); const pbBR = project(bBR.x, bBR.y, bBR.z);
-      const pfBL = project(fBL.x, fBL.y, fBL.z); const pbBL = project(bBL.x, bBL.y, bBL.z);
+      const pfTL = project(fTL, frontProj[0]); const pbTL = project(bTL, backProj[0]);
+      const pfTR = project(fTR, frontProj[1]); const pbTR = project(bTR, backProj[1]);
+      const pfBR = project(fBR, frontProj[2]); const pbBR = project(bBR, backProj[2]);
+      const pfBL = project(fBL, frontProj[3]); const pbBL = project(bBL, backProj[3]);
 
       ctx.beginPath(); ctx.moveTo(pfTL.x, pfTL.y); ctx.lineTo(pbTL.x, pbTL.y); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(pfTR.x, pfTR.y); ctx.lineTo(pbTR.x, pbTR.y); ctx.stroke();
@@ -1293,23 +1542,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
     const drawVoid = (ctx: CanvasRenderingContext2D, w: number, h: number, strength: number, time: number) => {
       if (strength <= 0.02) return;
+      const gradCanvas = ensureVoidGradient(w, h, strength);
+      if (gradCanvas) ctx.drawImage(gradCanvas, 0, 0);
       const cx = w / 2;
       const cy = h / 2;
       const core = 18 + strength * 70;
-      const halo = core * 2.6;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = 'source-over';
-
-      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, halo);
-      grad.addColorStop(0, 'rgba(8,8,8,0.92)');
-      grad.addColorStop(0.35, 'rgba(20,20,20,0.55)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(0, 0, halo, 0, Math.PI * 2);
-      ctx.fill();
 
       ctx.save();
       ctx.rotate(time * 0.15 + strength * 0.4);
@@ -1339,7 +1580,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.restore();
     };
 
-    const drawHUD = (ctx: CanvasRenderingContext2D, pairs: { b1: BubbleExt; b2: BubbleExt }[], w: number, h: number) => {
+    const drawHUD = (ctx: CanvasRenderingContext2D, pairs: { b1: BubbleExt | null; b2: BubbleExt | null }[], w: number, h: number) => {
       ctx.save();
       ctx.font = '10px "Courier New", monospace';
       ctx.textAlign = 'center';
@@ -1347,6 +1588,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       ctx.fillStyle = '#4A4F4A';
 
       pairs.forEach(({ b1, b2 }) => {
+        if (!b1 || !b2) return;
         const scale1 = FOCAL_LENGTH / (FOCAL_LENGTH + b1.z);
         const scale2 = FOCAL_LENGTH / (FOCAL_LENGTH + b2.z);
         const cx = w / 2; const cy = h / 2;
@@ -1613,12 +1855,13 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
       if (containerRef.current && canvasRef.current) {
         canvasRef.current.width = containerRef.current.clientWidth;
         canvasRef.current.height = containerRef.current.clientHeight;
+        resetCachesForSize();
       }
 
       const animate = () => {
         if (!canvasRef.current) return;
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d', { alpha: false });
+        const ctx = getCanvasContext(canvas);
         if (!ctx) return;
 
         // FPS measure
@@ -1673,19 +1916,24 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = 1.0;
-        ctx.fillStyle = '#2E2F2B';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const gradientBack = ctx.createLinearGradient(0, 0, 0, canvas.height);
-        gradientBack.addColorStop(0, '#2E2F2B');
-        gradientBack.addColorStop(1, '#3F453F');
-        ctx.fillStyle = gradientBack;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const backCanvas = ensureBackground(canvas.width, canvas.height);
+        if (backCanvas) {
+          ctx.drawImage(backCanvas, 0, 0);
+        } else {
+          ctx.fillStyle = '#2E2F2B';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          const gradientBack = ctx.createLinearGradient(0, 0, 0, canvas.height);
+          gradientBack.addColorStop(0, '#2E2F2B');
+          gradientBack.addColorStop(1, '#3F453F');
+          ctx.fillStyle = gradientBack;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
 
         const phys = physicsRef.current;
         const audio = audioSettingsRef.current;
         const time = Date.now() * 0.002 * Math.max(0.1, phys.tempo || 0);
         const nowMs = performance.now();
+        const frameId = (frameIdRef.current = frameIdRef.current + 1);
         updateGyroAuto(nowMs);
         const peakDb = audioService.getPeakLevel();
         const poolSize = audioService.getActivePoolSize();
@@ -1751,7 +1999,15 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           const p = particles[i];
           p.x += p.vx * tempo; p.y += p.vy * tempo; p.z += p.vz * tempo;
           p.life -= 0.02 * tempo;
-          if (p.life <= 0) { particles.splice(i, 1); i--; continue; }
+          if (p.life <= 0) {
+            const last = particles.pop();
+            if (last && last !== p) {
+              particles[i] = last;
+              i--;
+            }
+            releaseParticle(p);
+            continue;
+          }
 
           const scale = FOCAL_LENGTH / (FOCAL_LENGTH + p.z);
           const x2d = (p.x - cx) * scale + cx;
@@ -1784,7 +2040,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           }
           if (b.digitImpactsLeft !== undefined && b.digitImpactsLeft <= 0) {
             spawnPuff(b);
-            bubbles.splice(i, 1); i--; continue;
+            if (removeBubbleAt(bubbles, i)) i--;
+            continue;
           }
 
           // Freeze (Viscosity)
@@ -1805,18 +2062,23 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             for (let k = 0; k < 32; k++) spawnParticle(b.x, b.y, b.z, b.color);
             pushLog(`FPS_SHRED: ${b.id}`);
             shredQuota -= 1;
-            bubbles.splice(i, 1); i--; continue;
+            if (removeBubbleAt(bubbles, i)) i--;
+            continue;
           }
 
           if (fragmentation > 0 && Math.random() < fragmentation * 0.005) {
             for (let k = 0; k < 32; k++) spawnParticle(b.x, b.y, b.z, b.color);
             pushLog(`ERR_FRAG: ${b.id}`);
-            bubbles.splice(i, 1); i--; continue;
+            if (removeBubbleAt(bubbles, i)) i--;
+            continue;
           }
 
           if (weakness > 0) {
             b.radius -= (weakness * 0.1) * tempo;
-            if (b.radius < 5) { bubbles.splice(i, 1); i--; continue; }
+            if (b.radius < 5) {
+              if (removeBubbleAt(bubbles, i)) i--;
+              continue;
+            }
           }
 
           const blackHoleEff = Math.max(0, blackHole - 0.08);
@@ -1851,7 +2113,10 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
               b.voidEnteredAt = undefined;
               b.voidGraceMs = undefined;
             }
-            if (shouldSwallow) { bubbles.splice(i, 1); i--; continue; }
+            if (shouldSwallow) {
+              if (removeBubbleAt(bubbles, i)) i--;
+              continue;
+            }
 
             const ux = dx / r;
             const uy = dy / r;
@@ -2021,7 +2286,10 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         }
 
         // --- COLLISIONS ---
-        const collisionPairs: { b1: BubbleExt; b2: BubbleExt; dist: number }[] = [];
+        const topPairs = topPairsRef.current;
+        topPairs[0].b1 = null; topPairs[0].b2 = null; topPairs[0].dist = Infinity;
+        topPairs[1].b1 = null; topPairs[1].b2 = null; topPairs[1].dist = Infinity;
+        topPairs[2].b1 = null; topPairs[2].b2 = null; topPairs[2].dist = Infinity;
         for (let i = 0; i < bubbles.length; i++) {
           for (let j = i + 1; j < bubbles.length; j++) {
             const b1 = bubbles[i]; const b2 = bubbles[j];
@@ -2030,7 +2298,23 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
             const minDist = b1.radius + b2.radius;
 
             const dist = Math.sqrt(Math.max(EPS, distSq));
-            if (dist < minDist * 3) collisionPairs.push({ b1, b2, dist });
+            if (dist < minDist * 3) {
+              b1.overlapFrame = frameId;
+              b2.overlapFrame = frameId;
+              const p0 = topPairs[0];
+              const p1 = topPairs[1];
+              const p2 = topPairs[2];
+              if (dist < p0.dist) {
+                p2.b1 = p1.b1; p2.b2 = p1.b2; p2.dist = p1.dist;
+                p1.b1 = p0.b1; p1.b2 = p0.b2; p1.dist = p0.dist;
+                p0.b1 = b1; p0.b2 = b2; p0.dist = dist;
+              } else if (dist < p1.dist) {
+                p2.b1 = p1.b1; p2.b2 = p1.b2; p2.dist = p1.dist;
+                p1.b1 = b1; p1.b2 = b2; p1.dist = dist;
+              } else if (dist < p2.dist) {
+                p2.b1 = b1; p2.b2 = b2; p2.dist = dist;
+              }
+            }
 
             if (dist < minDist) {
               if (Math.random() < cannibalism) {
@@ -2082,18 +2366,11 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
           }
         }
 
-        const overlapIds = new Set<string>();
-        collisionPairs.forEach(({ b1, b2 }) => {
-          overlapIds.add(b1.id);
-          overlapIds.add(b2.id);
-        });
-
         // Draw
         bubbles.sort((a, b) => b.z - a.z);
         drawWallReflections(ctx, bubbles, canvas.width, canvas.height);
-        bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, (b.z / DEPTH) * 6, overlapIds.has(b.id), nowMs));
+        bubbles.forEach(b => drawAmoeba(ctx, b, canvas.width, canvas.height, (b.z / DEPTH) * 6, b.overlapFrame === frameId, nowMs));
 
-        const topPairs = collisionPairs.sort((a, b) => a.dist - b.dist).slice(0, 3);
         drawHUD(ctx, topPairs, canvas.width, canvas.height);
         drawSpatialGyro(ctx, canvas.width, canvas.height, time);
 
@@ -2106,6 +2383,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         if (containerRef.current && canvasRef.current) {
           canvasRef.current.width = containerRef.current.clientWidth;
           canvasRef.current.height = containerRef.current.clientHeight;
+          resetCachesForSize();
         }
       };
 
