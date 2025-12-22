@@ -1,6 +1,6 @@
 # Glass Room
 
-![Glass Room](public/ici.png)
+![Glass Room](public/glass-room.png)
 
 Generatywna aplikacja audio-wizualna w przegladarce. Tworzysz lodowe kulki,
 ktore poruszaja sie w przestrzeni 3D i uruchamiaja dzwieki przy zderzeniach.

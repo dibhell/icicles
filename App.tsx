@@ -4,7 +4,6 @@ import { Mixer } from './components/Mixer';
 import { Visualizer, VisualizerHandle } from './components/Visualizer';
 import { AudioSettings, PhysicsSettings, MusicSettings } from './types';
 import { audioService } from './services/audioEngine';
-import iciLogo from './ici.png';
 import { SCALES, DEFAULT_SCALE_ID } from './src/music/scales';
 import { NOTE_NAMES, pitchClassToNoteName } from './src/music/notes';
 import {
@@ -506,7 +505,7 @@ const App: React.FC = () => {
         {!hasInteracted && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#F2F2F0] opacity-100">
             <div className="relative w-64 h-64 md:w-80 md:h-80 mb-12">
-              <img src={iciLogo} alt="Glass Room" className="w-full h-full object-contain drop-shadow-2xl" />
+              <img src="/glass-room.png" alt="Glass Room" className="w-full h-full object-contain drop-shadow-2xl" />
             </div>
 
             <button
