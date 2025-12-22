@@ -324,7 +324,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F2F2F0] text-[#2E2F2B] p-2 md:p-8 flex flex-col items-center pb-20 font-sans selection:bg-[#7A8476] selection:text-white">
       <header className="mb-8 text-center mt-4 md:mt-0">
-        <h1 className="text-3xl md:text-5xl font-light tracking-[0.2em] text-[#3F453F] lowercase">icicles chamber</h1>
+        <h1 className="text-3xl md:text-5xl font-light tracking-[0.2em] text-[#3F453F] lowercase">Glass Room</h1>
         <p className="text-[#5F665F] text-xs tracking-widest mt-2 uppercase">Generative Frost Synthesis</p>
       </header>
 
@@ -506,7 +506,7 @@ const App: React.FC = () => {
         {!hasInteracted && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#F2F2F0] opacity-100">
             <div className="relative w-64 h-64 md:w-80 md:h-80 mb-12">
-              <img src={iciLogo} alt="Icicles Chamber" className="w-full h-full object-contain drop-shadow-2xl" />
+              <img src={iciLogo} alt="Glass Room" className="w-full h-full object-contain drop-shadow-2xl" />
             </div>
 
             <button

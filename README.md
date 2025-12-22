@@ -1,6 +1,6 @@
-# Icicles Chamber
+# Glass Room
 
-![Icicles Chamber](public/ici.png)
+![Glass Room](public/ici.png)
 
 Generatywna aplikacja audio-wizualna w przegladarce. Tworzysz lodowe kulki,
 ktore poruszaja sie w przestrzeni 3D i uruchamiaja dzwieki przy zderzeniach.
