@@ -546,7 +546,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
   }, [loadedSummary]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-4 lg:p-6 shadow-lg relative isolate mt-6 mb-14 text-[#5F665F] font-mono tracking-widest select-none h-auto transition-all">
+    <div className="w-full max-w-6xl mx-auto bg-[#D9DBD6] border border-[#B9BCB7] rounded-3xl p-4 lg:p-2 shadow-lg relative isolate mt-6 mb-3 text-[#5F665F] font-mono tracking-widest select-none h-auto transition-all">
       <style>{`
         @keyframes loaded-marquee {
           0% { transform: translateX(0); }
@@ -737,7 +737,7 @@ export const Mixer: React.FC<MixerProps> = ({ settings, setSettings, isPlaying, 
         </div>
 
         {/* DATA */}
-        <div className="col-span-2 lg:col-span-1 min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1" style={{ gridTemplateRows: '16px 1fr' }}>
+        <div className="col-span-2 lg:col-span-1 min-w-0 bg-[#D9DBD6] rounded-2xl border border-[#C7C9C5] p-3 grid gap-1 justify-center" style={{ gridTemplateRows: '16px 1fr' }}>
           <div className="h-4 text-[#7A8476] leading-none flex items-center justify-center" title="Data">
             <Book size={14} />
             <span className="sr-only">Data</span>

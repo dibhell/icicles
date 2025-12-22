@@ -341,7 +341,8 @@ const App: React.FC = () => {
       )}
 
       <div className="w-full max-w-5xl relative flex-1 flex flex-col">
-        <div className="relative z-10 p-2 rounded-xl bg-[#D9DBD6] shadow-md mb-8 md:mb-12 sticky top-2 md:static">
+        <div className="relative z-10 p-2 rounded-xl bg-[#D9DBD6] shadow-md mb-8 md:mb-6
+         sticky top-2 md:static">
           <Visualizer
             ref={visualizerRef}
             isPlaying={isPlaying}
@@ -351,8 +352,8 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div className="flex flex-col xl:flex-row justify-center gap-6 mb-12">
-          <div className="relative flex flex-wrap justify-center gap-4 px-4 py-8 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
+        <div className="flex flex-col xl:flex-row justify-center gap-6 mb-1">
+          <div className="relative flex flex-wrap justify-center gap-4 px-4 py-4 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
             <GroupLabel text="Physics" />
             <KnobWithIcon value={physicsKnobs.tempo} onChange={(v) => setKnob('tempo', v)} icon={Activity} label="Tempo" defaultValue={0.5} />
             <KnobWithIcon value={physicsKnobs.gravity} onChange={(v) => setKnob('gravity', v)} icon={MoveDown} label="Gravity" defaultValue={0.0} />
@@ -364,7 +365,7 @@ const App: React.FC = () => {
             <KnobWithIcon value={physicsKnobs.roomWave} onChange={(v) => setKnob('roomWave', v)} icon={Fish} label="Wave" defaultValue={0.0} />
           </div>
 
-          <div className="relative flex flex-wrap justify-center gap-4 px-4 py-8 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
+          <div className="relative flex flex-wrap justify-center gap-4 px-4 py-4 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
             <GroupLabel text="Creative" />
             <KnobWithIcon value={physicsKnobs.tuning} onChange={(v) => setKnob('tuning', v)} icon={AudioLines} label="Tuning" defaultValue={0.5} />
             <KnobWithIcon
@@ -485,7 +486,7 @@ const App: React.FC = () => {
             </KnobWithIcon>
           </div>
 
-          <div className="relative flex flex-wrap justify-center gap-4 px-4 py-8 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
+          <div className="relative flex flex-wrap justify-center gap-4 px-4 py-4 bg-[#F2F2F0] rounded-3xl border border-[#B9BCB7] shadow-sm w-full xl:w-auto">
             <GroupLabel text="Destructive" />
             <KnobWithIcon value={physicsKnobs.budding} onChange={(v) => setKnob('budding', v)} icon={Sprout} label="Budding" defaultValue={0.0} />
             <KnobWithIcon value={physicsKnobs.cannibalism} onChange={(v) => setKnob('cannibalism', v)} icon={Merge} label="Merge" defaultValue={0.0} />
