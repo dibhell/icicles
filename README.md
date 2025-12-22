@@ -24,7 +24,7 @@ ktore poruszaja sie w przestrzeni 3D i uruchamiaja dzwieki przy zderzeniach.
 1. `npm install`
 2. `npm run dev`
 3. Otworz `http://localhost:5173`
-4. Kliknij "Enter Chamber", aby odblokowac audio (wymog przegladarek).
+4. Kliknij "ENTER ROOM", aby odblokowac audio (wymog przegladarek).
 
 ## Dokumentacja
 - [docs/STEROWANIE.md](docs/STEROWANIE.md) - opis kontrolek i gestow.

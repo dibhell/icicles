@@ -1,7 +1,7 @@
 # Sterowanie i parametry
 
 ## Start i interakcja
-- Kliknij "Enter Chamber", aby uruchomic audio.
+- Kliknij "ENTER ROOM", aby uruchomic audio.
 - Play/Pause startuje lub pauzuje generacje dzwieku.
 - Stop zatrzymuje dzwiek i resetuje scene.
 - Klikniecie w wizualizator tworzy kulke, przeciaganie dodaje kolejne.

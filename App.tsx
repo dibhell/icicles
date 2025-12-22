@@ -514,7 +514,7 @@ const App: React.FC = () => {
               onClick={handleStart}
               className="px-10 py-4 bg-[#2E2F2B] text-[#F2F2F0] font-light text-xl tracking-[0.3em] uppercase rounded-sm hover:bg-[#3F453F] hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl border border-[#5F665F]"
             >
-              Enter Chamber
+              ENTER ROOM
             </button>
 
             <p className="absolute bottom-8 text-[10px] text-[#7A8476] tracking-widest uppercase">A Generative Audio Experience</p>
