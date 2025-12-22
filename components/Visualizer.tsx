@@ -1840,7 +1840,34 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
       const isAuto = gyroAutoRef.current.enabled;
       const lissajous = audioService.getStereoWaveform();
-      const drawAutoCircle = (y: number, alpha: number, showGlyph: boolean, showLissajous: boolean) => {
+      const lissajousR = Math.max(autoR * 2.55, circleR * 2.05);
+      const lissajousY = -autoY - 1;
+      const drawLissajous = (y: number) => {
+        if (!lissajous) return;
+        const left = lissajous.left;
+        const right = lissajous.right;
+        const step = Math.max(1, Math.floor(left.length / 120));
+        const radius = lissajousR;
+        const boost = 1.3;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, y, radius, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(214, 222, 216, 0.7)';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        for (let i = 0; i < left.length; i += step) {
+          const lx = left[i] || 0;
+          const ry = right[i] || 0;
+          const px = lx * radius * boost;
+          const py = ry * radius * boost + y;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.restore();
+      };
+      const drawAutoCircle = (y: number, alpha: number, showGlyph: boolean) => {
         ctx.save();
         ctx.globalAlpha = alpha;
         ctx.fillStyle = isAuto ? 'rgba(214, 222, 216, 0.85)' : 'rgba(32, 34, 30, 0.45)';
@@ -1852,30 +1879,6 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.stroke();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        if (showLissajous && lissajous) {
-          const left = lissajous.left;
-          const right = lissajous.right;
-          const step = Math.max(1, Math.floor(left.length / 90));
-          const radius = autoR - 2;
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(0, y, autoR - 1, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.strokeStyle = isAuto ? 'rgba(40, 44, 40, 0.75)' : 'rgba(214, 222, 216, 0.7)';
-          ctx.lineWidth = 0.9;
-          ctx.beginPath();
-          for (let i = 0; i < left.length; i += step) {
-            const lx = left[i] || 0;
-            const ry = right[i] || 0;
-            const boost = 1.45;
-            const px = lx * radius * boost;
-            const py = ry * radius * boost + y;
-            if (i === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.stroke();
-          ctx.restore();
-        }
         if (showGlyph) {
           ctx.fillStyle = isAuto ? 'rgba(46, 47, 43, 0.95)' : 'rgba(214, 222, 216, 0.75)';
           ctx.font = isAuto ? '10px "Courier New", monospace' : 'bold 12px "Courier New", monospace';
@@ -1884,8 +1887,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.restore();
       };
 
-      drawAutoCircle(-autoY, 0.55, false, true);
-      drawAutoCircle(autoY, 0.9, true, false);
+      drawLissajous(lissajousY);
+      drawAutoCircle(autoY, 0.9, true);
 
       ctx.font = '8px "Courier New", monospace';
       ctx.textAlign = 'left';

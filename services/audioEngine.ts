@@ -1459,9 +1459,9 @@ class AudioEngine {
     
     // --- SPATIAL CHAIN ---
     const spatial = this.spatialControl;
-    const panWith = clamp(safePan + spatial.pan * 0.9, -1, 1);
-    const depthWith = clamp(safeDepth + spatial.depth * 0.6, 0, 1);
-    const widthScale = clamp(1 + spatial.width * 1.1, 0.2, 2.2);
+    const panWith = clamp(safePan + spatial.pan * 1.25, -1, 1);
+    const depthWith = clamp(safeDepth + spatial.depth * 0.9, 0, 1);
+    const widthScale = clamp(1 + spatial.width * 1.8, 0.2, 2.6);
 
     const panner = this.ctx.createPanner();
     panner.panningModel = 'HRTF';
@@ -1472,14 +1472,14 @@ class AudioEngine {
     panner.coneInnerAngle = 360;
     panner.coneOuterAngle = 0;
     panner.coneOuterGain = 0;
-    panner.positionX.setValueAtTime(panWith * 2.2 * widthScale, now);
+    panner.positionX.setValueAtTime(panWith * 2.8 * widthScale, now);
     panner.positionY.setValueAtTime(0, now);
-    panner.positionZ.setValueAtTime(-0.6 - (depthWith * 4.6), now);
+    panner.positionZ.setValueAtTime(-0.4 - (depthWith * 6.2), now);
 
     const depthFilter = this.ctx.createBiquadFilter();
     depthFilter.type = 'lowpass';
-    const minCutoff = 1000;
-    const maxCutoff = 22000;
+    const minCutoff = 550;
+    const maxCutoff = 18000;
     const cutoff = maxCutoff * Math.pow(minCutoff / maxCutoff, depthWith);
     depthFilter.frequency.value = cutoff;
     depthFilter.Q.value = 0; 
@@ -1535,11 +1535,12 @@ class AudioEngine {
     finalFreq = Math.max(40, Math.min(12000, finalFreq));
 
     // --- GAIN STAGING ---
-    const baseVol = 0.25 * safeVolume; 
+    const baseVol = 0.25 * safeVolume;
+    const depthAtten = lerp(1, 0.55, depthWith);
     
     // Use an Epsilon to prevent exponentialRampToValueAtTime errors when starting from 0
     const EPSILON = 0.001; 
-    const peakVol = Math.max(EPSILON, baseVol);
+    const peakVol = Math.max(EPSILON, baseVol * depthAtten);
 
     const cleanup = () => {
         this.activeVoices = Math.max(0, this.activeVoices - 1);
