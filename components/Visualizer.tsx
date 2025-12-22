@@ -1840,8 +1840,8 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
       const isAuto = gyroAutoRef.current.enabled;
       const lissajous = audioService.getStereoWaveform();
-      const lissajousR = Math.max(autoR * 2.55, circleR * 2.05);
-      const lissajousY = -autoY - 1;
+      const lissajousR = Math.max(autoR * 1.55, circleR * 2.05);
+      const lissajousY = -autoY + 4;
       const drawLissajous = (y: number) => {
         if (!lissajous) return;
         const left = lissajous.left;
@@ -1853,7 +1853,7 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
         ctx.beginPath();
         ctx.arc(0, y, radius, 0, Math.PI * 2);
         ctx.clip();
-        ctx.strokeStyle = 'rgba(214, 222, 216, 0.7)';
+        ctx.strokeStyle = 'rgba(122, 132, 118, 0.45)';
         ctx.lineWidth = 1.1;
         ctx.beginPath();
         for (let i = 0; i < left.length; i += step) {
