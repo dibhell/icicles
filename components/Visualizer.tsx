@@ -1207,12 +1207,14 @@ export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(
 
       const width = (canvasRef.current && canvasRef.current.width > 0) ? canvasRef.current.width : 1000;
       const pan = (b.x / width) * 2 - 1;
-      const depth = Math.min(1, Math.max(0, b.z / DEPTH));
+      const depth = clamp01(Math.pow(b.z / DEPTH, 0.75));
+      const canvasH = (canvasRef.current && canvasRef.current.height > 0) ? canvasRef.current.height : 1000;
+      const height = clampSigned(1 - (b.y / canvasH) * 2);
 
       audioService.triggerSound(
         1 - (b.radius / 180),
         audio.baseFrequency,
-        pan, depth, b.vz,
+        pan, depth, height, b.vz,
         phys.doppler, isReverse, finalVol,
         musicSettingsRef.current,
         undefined,

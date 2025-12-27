@@ -1417,6 +1417,7 @@ class AudioEngine {
     baseFreq: number, 
     pan: number = 0, 
     depth: number = 0, 
+    height: number = 0,
     velocityZ: number = 0,
     dopplerIntensity: number = 0,
     isReverse: boolean = false, 
@@ -1440,8 +1441,9 @@ class AudioEngine {
     this.activeVoices++;
 
     const safeBaseFreq = (Number.isFinite(baseFreq) && baseFreq > 0) ? baseFreq : 440;
-    const safePan = Number.isFinite(pan) ? Math.max(-1, Math.min(1, pan)) : 0;
-    const safeDepth = Number.isFinite(depth) ? depth : 0;
+    const safePan = Number.isFinite(pan) ? clamp(pan, -1, 1) : 0;
+    const safeDepth = Number.isFinite(depth) ? clamp(depth, 0, 1) : 0;
+    const safeHeight = Number.isFinite(height) ? clamp(height, -1, 1) : 0;
     const safeVolume = (Number.isFinite(volume) && volume >= 0) ? volume : 0.5;
     const safeSampleGain = (Number.isFinite(sampleGain) && sampleGain >= 0) ? clamp(sampleGain, 0, 2) : 1;
     const safeMusic: MusicSettings = {
@@ -1459,35 +1461,69 @@ class AudioEngine {
     
     // --- SPATIAL CHAIN ---
     const spatial = this.spatialControl;
-    const panWith = clamp(safePan + spatial.pan * 1.25, -1, 1);
-    const depthWith = clamp(safeDepth + spatial.depth * 0.9, 0, 1);
-    const widthScale = clamp(1 + spatial.width * 1.8, 0.2, 2.6);
+    const panWith = clamp(safePan + spatial.pan * 1.75, -1, 1);
+    const depthWith = clamp(safeDepth + spatial.depth * 1.5, -1, 1);
+    const widthScale = clamp(1 + spatial.width * 2.6, 0.4, 3.4);
+    const heightWith = clamp(safeHeight, -1, 1);
+    const panCurve = Math.sign(panWith) * Math.pow(Math.abs(panWith), 0.65);
+    const depthCurve = Math.sign(depthWith) * Math.pow(Math.abs(depthWith), 0.7);
+    const heightCurve = Math.sign(heightWith) * Math.pow(Math.abs(heightWith), 0.75);
+    const depthMag = Math.abs(depthCurve);
 
     const panner = this.ctx.createPanner();
     panner.panningModel = 'HRTF';
     panner.distanceModel = 'inverse';
     panner.refDistance = 1;
-    panner.maxDistance = 6;
-    panner.rolloffFactor = 0;
+    panner.maxDistance = 20;
+    panner.rolloffFactor = 0.18;
     panner.coneInnerAngle = 360;
     panner.coneOuterAngle = 0;
     panner.coneOuterGain = 0;
-    panner.positionX.setValueAtTime(panWith * 2.8 * widthScale, now);
-    panner.positionY.setValueAtTime(0, now);
-    panner.positionZ.setValueAtTime(-0.4 - (depthWith * 6.2), now);
+    const zDist = lerp(1.0, 10.5, depthMag);
+    const zPos = depthCurve >= 0 ? -zDist : zDist;
+    panner.positionX.setValueAtTime(panCurve * 4.6 * widthScale, now);
+    panner.positionY.setValueAtTime(heightCurve * 2.8, now);
+    panner.positionZ.setValueAtTime(zPos, now);
 
     const depthFilter = this.ctx.createBiquadFilter();
     depthFilter.type = 'lowpass';
-    const minCutoff = 550;
+    const minCutoff = 380;
     const maxCutoff = 18000;
-    const cutoff = maxCutoff * Math.pow(minCutoff / maxCutoff, depthWith);
+    const rearDamp = depthCurve < 0 ? 0.55 : 1;
+    const cutoff = clamp(
+      maxCutoff * Math.pow(minCutoff / maxCutoff, depthMag) * rearDamp,
+      150,
+      maxCutoff
+    );
     depthFilter.frequency.value = cutoff;
     depthFilter.Q.value = 0; 
 
     depthFilter.connect(panner);
 
+    let spatialOutput: AudioNode = panner;
+    let haasSplit: ChannelSplitterNode | null = null;
+    let haasMerge: ChannelMergerNode | null = null;
+    let haasDelayL: DelayNode | null = null;
+    let haasDelayR: DelayNode | null = null;
+    const haasMax = 0.0012;
+    const haas = haasMax * Math.min(1, Math.abs(panCurve));
+    if (haas > 0.00005) {
+      haasSplit = this.ctx.createChannelSplitter(2);
+      haasMerge = this.ctx.createChannelMerger(2);
+      haasDelayL = this.ctx.createDelay(haasMax);
+      haasDelayR = this.ctx.createDelay(haasMax);
+      haasDelayL.delayTime.value = panCurve > 0 ? haas : 0;
+      haasDelayR.delayTime.value = panCurve < 0 ? haas : 0;
+      panner.connect(haasSplit);
+      haasSplit.connect(haasDelayL, 0);
+      haasSplit.connect(haasDelayR, 1);
+      haasDelayL.connect(haasMerge, 0, 0);
+      haasDelayR.connect(haasMerge, 0, 1);
+      spatialOutput = haasMerge;
+    }
+
     const sourceGain = this.ctx.createGain();
-    panner.connect(sourceGain);
+    spatialOutput.connect(sourceGain);
     
     sourceGain.connect(this.dryGain!);
     sourceGain.connect(this.reverbNode!);
@@ -1536,7 +1572,7 @@ class AudioEngine {
 
     // --- GAIN STAGING ---
     const baseVol = 0.25 * safeVolume;
-    const depthAtten = lerp(1, 0.55, depthWith);
+    const depthAtten = lerp(1, 0.8, depthMag);
     
     // Use an Epsilon to prevent exponentialRampToValueAtTime errors when starting from 0
     const EPSILON = 0.001; 
@@ -1549,6 +1585,10 @@ class AudioEngine {
                 sourceGain.disconnect();
                 panner.disconnect();
                 depthFilter.disconnect();
+                haasDelayL?.disconnect();
+                haasDelayR?.disconnect();
+                haasSplit?.disconnect();
+                haasMerge?.disconnect();
             } catch (e) { /* ignore */ }
         }, 1000);
     };
